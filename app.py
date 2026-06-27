@@ -15,6 +15,29 @@ from reportlab.pdfbase.ttfonts import TTFont
 # Konfiguracja ekranu pod tablet na magazynie
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
 
+# --- ZABEZPIECZENIE HASŁEM ---
+if "autoryzowany" not in st.session_state:
+    st.session_state["autoryzowany"] = False
+
+if not st.session_state["autoryzowany"]:
+    st.title("🏭 JANMAR WMS - PANEL RAMPOWY")
+    st.write("---")
+    st.subheader("🔒 Dostęp zablokowany. Wprowadź hasło magazynowe:")
+    
+    # Pole na hasło (zamienia znaki na kropki)
+    haslo_input = st.text_input("Hasło dostępu:", type="password")
+    
+    if st.button("🔓 ZALOGUJ DO SYSTEMU"):
+        if haslo_input == "Janmar2026":
+            st.session_state["autoryzowany"] = True
+            st.success("✅ Hasło poprawne! Ładowanie systemu...")
+            st.rerun()
+        else:
+            st.error("❌ Błędne hasło! Spróbuj ponownie.")
+    st.stop() # Zatrzymuje wykonywanie kodu, dopóki hasło nie jest poprawne
+
+# --- JEŚLI HASŁO JEST POPRAWNE, URUCHAMIA SIĘ RESZTA APLIKACJI ---
+
 st.markdown("""
     <style>
     html, body, [data-testid="stWidgetLabel"] p { font-size: 20px !important; font-weight: 600 !important; }
@@ -25,8 +48,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.4")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.4 🔓")
 st.subheader("Wersja z pełnym kodowaniem polskich znaków TTF")
+
+# Przycisk wylogowania w rogu dla bezpieczeństwa
+if st.button("🔒 WYLOGUJ Z PANELU"):
+    st.session_state["autoryzowany"] = False
+    st.rerun()
+
 st.write("---")
 
 # Bazy danych w pamięci podręcznej (Session State)
@@ -45,15 +74,12 @@ if "lista_magazynierow" not in st.session_state:
 
 # GENERATOR DOKUMENTU PDF PZ
 def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img):
-    
-    # REJESTRACJA CZCIONKI Z PEŁNYM WSPARCIEM POLSKICH ZNAKÓW (TrueType)
     try:
         pdfmetrics.registerFont(TTFont('PolishFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
         pdfmetrics.registerFont(TTFont('PolishFont-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
         f_regular = 'PolishFont'
         f_bold = 'PolishFont-Bold'
     except:
-        # Awaryjny font, gdyby system miał inną ścieżkę (standard w ReportLab)
         f_regular = 'Helvetica'
         f_bold = 'Helvetica-Bold'
 
@@ -62,7 +88,6 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     story = []
     styles = getSampleStyleSheet()
     
-    # Style oparte na zarejestrowanej polskiej czcionce TTF
     title_style = ParagraphStyle('TitleStyle', fontName=f_bold, fontSize=18, leading=22, textColor=colors.HexColor('#1F497D'), alignment=1)
     sub_style = ParagraphStyle('SubStyle', fontName=f_regular, fontSize=10, leading=14)
     header_table_style = ParagraphStyle('HeaderTableStyle', fontName=f_bold, fontSize=9, leading=11, textColor=colors.white, alignment=1)
@@ -147,7 +172,7 @@ if nowy_towar_chk:
             st.success("✅ Dodano towar do listy.")
             st.rerun()
 
-rodzaj_opakowania = st.radio("Rodzaj opakowania towaru:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
+rodzaj_opakowania = st.radio("Rodzaj packagingu towaru:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
 szczegoly_opakowania = "Luz/Brak"
 if rodzaj_opakowania == "OPAKOWANIE WYMIENNE":
     szczegoly_opakowania = st.selectbox("Wybierz typ opakowania wymiennego:", options=["KARTON JANMAR", "ŁUSZCZKA JANMAR", "SKRZYNIA JANMAR", "WŁASNOŚĆ DOSTAWCY", "OPAKOWANIE IFCO", "OPAKOWANIE EPS"])
@@ -223,7 +248,7 @@ if st.session_state["status_jakosci"] == "ZIELONY":
     st.markdown('<div class="status-box" style="background-color: #2ecc71;">🟢 JAKOŚĆ OK - TOWAR PRZYJĘTY</div>', unsafe_allow_html=True)
 elif st.session_state["status_jakosci"] == "POMARAŃCZOWY":
     st.markdown('<div class="status-box" style="background-color: #f39c12;">🟠 PRZYJĘCIE WARUNKOWE</div>', unsafe_allow_html=True)
-    komentarz_jakosc = st.selectbox("Powód:", ["TOWAR PRZYJĘTY WARUNKOWO DO ROZLICZENIA PO SPRZEDAŻY PRZEZ KUPCA", "UBYTEK WAGI POWYŻEJ TOLERANCJI", "WIDOCZNE USZKODZENIA MECHANICZNE / TRANSPORTOWE", "ODKŁOSY/OZNAKI PSUCIA – WYMAGA PRZEBRANIA NA MAGAZYNIE"])
+    komentarz_jakosc = st.selectbox("Powód:", ["TOWAR PRZYJĘTY WARUNKOWO DO ROZLICZENIA PO SPRZEDAŻY PRZEZ KUPCA", "UBYTEK WAGI POWYŻEJ TOLERANCJI", "WIDOCZNE USZKODZENIA MECHANICZNE / TRANSPORTOWE", "ODKŁOSY/OZNAKI PSUCIA – WYMACHUJE PRZEBRANIA NA MAGAZYNIE"])
 elif st.session_state["status_jakosci"] == "CZERWONY":
     st.markdown('<div class="status-box" style="background-color: #e74c3c;">🔴 TOWAR ODRZUCONY - ZWROT</div>', unsafe_allow_html=True)
     komentarz_jakosc = st.text_input("Uzasadnienie (wymagane):")
