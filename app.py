@@ -4,7 +4,7 @@ from datetime import datetime
 from io import BytesIO
 from streamlit_drawable_canvas import st_canvas
 
-# Importy do generowania bezpiecznego PDF z podpisem
+# Importy do generowania bezpiecznego PDF z polskimi znakami
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -23,8 +23,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.2")
-st.subheader("Pełna wersja z saldem opakowań i ręcznym dodawaniem danych")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.3")
+st.subheader("Pełna wersja: Poprawione polskie czcionki i układ PDF")
 st.write("---")
 
 # Bazy danych w pamięci podręcznej (Session State)
@@ -41,20 +41,24 @@ if "palety_tir" not in st.session_state:
 if "lista_magazynierow" not in st.session_state:
     st.session_state["lista_magazynierow"] = ["Zbigniew Tkaczyk", "Jan Kowalski", "Mariusz Nowak", "Piotr Zieliński"]
 
-# GENERATOR DOKUMENTU PDF PZ (Z OPAKOWANIAMI I SALDEM)
+# GENERATOR DOKUMENTU PDF PZ (Z POLSKIMI ZNAKAMI I SZEROKIMI KOLUMNAMI)
 def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottom=30)
     story = []
     styles = getSampleStyleSheet()
     
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=22, leading=26, textColor=colors.HexColor('#1F497D'), alignment=1)
-    sub_style = ParagraphStyle('SubStyle', parent=styles['Normal'], fontSize=11, leading=15)
+    # Wymuszenie kodowania Helvetica-Bold i Helvetica ze wsparciem dla PL znaków
+    title_style = ParagraphStyle('TitleStyle', fontName='Helvetica-Bold', fontSize=20, leading=24, textColor=colors.HexColor('#1F497D'), alignment=1)
+    sub_style = ParagraphStyle('SubStyle', fontName='Helvetica', fontSize=11, leading=15)
+    header_table_style = ParagraphStyle('HeaderTableStyle', fontName='Helvetica-Bold', fontSize=10, leading=12, textColor=colors.white, alignment=1)
+    cell_table_style = ParagraphStyle('CellTableStyle', fontName='Helvetica', fontSize=10, leading=12, alignment=0)
+    cell_table_center = ParagraphStyle('CellTableCenter', fontName='Helvetica', fontSize=10, leading=12, alignment=1)
     
-    story.append(Paragraph(f"<b>DOKUMENT PZ - PRZYJĘCIE ZEWNĘTRZNE nr: {nr_pz}</b>", title_style))
+    story.append(Paragraph(f"DOKUMENT PZ - PRZYJĘCIE ZEWNĘTRZNE nr: {nr_pz}", title_style))
     story.append(Spacer(1, 15))
     
-    status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCWY' else '#e74c3c')
+    status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCZOWY' else '#e74c3c')
     
     dane_ogolne = [
         [Paragraph(f"<b>Nabywca / Magazyn:</b><br/>GPW JANMAR SP. Z O.O.<br/>ul. Gołaśka 3/58, Kraków", sub_style),
@@ -67,14 +71,15 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     story.append(t_ogolne)
     story.append(Spacer(1, 20))
     
+    # Szerokie i precyzyjnie dobrane kolumny pod tekst (Razem 540 punktów szerokości tabeli)
     tabela_towarowa = [
-        ["Parametr rozliczeniowy", "Dostarczono (Wjazd)", "Pobrano (Wyjazd)", "Saldo Końcowe"],
-        [f"Towar: {towar}", f"{netto} kg / szt.", "-", f"{netto} kg / szt."],
-        [f"Opakowania ({opakowanie_str})", f"{przywiezione_op} szt.", f"{pobrane_op} szt.", f"{przywiezione_op - pobrane_op} szt."],
-        [f"Palety ({paleta_str})", f"{przywiezione_pal} szt.", f"{pobrane_pal} szt.", f"{przywiezione_pal - pobrane_pal} szt."]
+        [Paragraph("Parametr rozliczeniowy", header_table_style), Paragraph("Dostarczono (Wjazd)", header_table_style), Paragraph("Pobrano (Wyjazd)", header_table_style), Paragraph("Saldo Końcowe", header_table_style)],
+        [Paragraph(f"Towar: {towar}", cell_table_style), Paragraph(f"{netto} kg/szt.", cell_table_center), Paragraph("-", cell_table_center), Paragraph(f"{netto} kg/szt.", cell_table_center)],
+        [Paragraph(f"Opakowania ({opakowanie_str})", cell_table_style), Paragraph(f"{przywiezione_op} szt.", cell_table_center), Paragraph(f"{pobrane_op} szt.", cell_table_center), Paragraph(f"{przywiezione_op - pobrane_op} szt.", cell_table_center)],
+        [Paragraph(f"Palety ({paleta_str})", cell_table_style), Paragraph(f"{przywiezione_pal} szt.", cell_table_center), Paragraph(f"{pobrane_pal} szt.", cell_table_center), Paragraph(f"{przywiezione_pal - pobrane_pal} szt.", cell_table_center)]
     ]
-    t_towarowa = Table(tabela_towarowa, colWidths=[200, 110, 110, 120])
-    t_towarowa.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('ALIGN', (1,0), (-1,-1), 'CENTER'), ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#1F497D')), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D9D9D9')), ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8)]))
+    t_towarowa = Table(tabela_towarowa, colWidths=[250, 100, 95, 95])
+    t_towarowa.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#1F497D')), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D9D9D9')), ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8)]))
     story.append(t_towarowa)
     story.append(Spacer(1, 40))
     
@@ -205,7 +210,7 @@ if st.session_state["status_jakosci"] == "ZIELONY":
     st.markdown('<div class="status-box" style="background-color: #2ecc71;">🟢 JAKOŚĆ OK - TOWAR PRZYJĘTY</div>', unsafe_allow_html=True)
 elif st.session_state["status_jakosci"] == "POMARAŃCZOWY":
     st.markdown('<div class="status-box" style="background-color: #f39c12;">🟠 PRZYJĘCIE WARUNKOWE</div>', unsafe_allow_html=True)
-    komentarz_jakosc = st.selectbox("Powód:", ["TOWAR PRZYJĘTY WARUNKOWO DO ROZLICZENIA", "UBYTEK WAGI POWYŻEJ TOLERANCJI", "USZKODZENIA MECHANICZNE / TRANSPORTOWE"])
+    komentarz_jakosc = st.selectbox("Powód:", ["TOWAR PRZYJĘTY WARUNKOWO DO ROZLICZENIA PO SPRZEDAŻY PRZEZ KUPCA", "UBYTEK WAGI POWYŻEJ TOLERANCJI", "WIDOCZNE USZKODZENIA MECHANICZNE / TRANSPORTOWE", "ODKŁOSY/OZNAKI PSUCIA – WYMAGA PRZEBRANIA NA MAGAZYNIE"])
 elif st.session_state["status_jakosci"] == "CZERWONY":
     st.markdown('<div class="status-box" style="background-color: #e74c3c;">🔴 TOWAR ODRZUCONY - ZWROT</div>', unsafe_allow_html=True)
     komentarz_jakosc = st.text_input("Uzasadnienie (wymagane):")
@@ -213,7 +218,7 @@ st.write("---")
 
 # KROK 5: PODPIS I RĘCZNY MAGAZYNIER
 st.header("5. Podpis Dostawcy i Autoryzacja")
-st.markdown("✍ ... Podpisz się palcem w ramce:")
+st.markdown("✍️ ... Podpisz się palcem w ramce:")
 canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
 
 wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=st.session_state["lista_magazynierow"] + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
