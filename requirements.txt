@@ -1,3 +1,4 @@
 reportlab
 streamlit-drawable-canvas
 qrcode
+requests
