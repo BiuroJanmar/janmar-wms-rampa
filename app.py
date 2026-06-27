@@ -16,7 +16,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 # KONFIGURACJA POŁĄCZENIA FIREBASE
-FIREBASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app/janmar_wms_rampa.json"
+FIREBASE_BASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app"
+FIREBASE_URL = f"{FIREBASE_BASE_URL}/janmar_wms_rampa.json"
+FIREBASE_KONTRAHENCI_URL = f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci.json"
+FIREBASE_PRACOWNICY_URL = f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy.json"
 
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
 
@@ -48,8 +51,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.8 🔓")
-st.subheader("Wersja z pełnym linkowaniem kodów QR dla handlowców")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.0 ☁️")
+st.subheader("Wersja z trwałą bazą kontrahentów i pracowników w Firebase")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -57,19 +60,39 @@ if st.button("🔒 WYLOGUJ Z PANELU"):
 
 st.write("---")
 
-# Bazy danych w pamięci sesji
-if "baza_dostawcow" not in st.session_state:
-    st.session_state["baza_dostawcow"] = {
-        "JAN-11199": {"nazwa": "MARCIN PRZEWORSKI", "tel": "601234567"},
-        "JAN-10023": {"nazwa": "AGRO-HURT JANUSZ", "tel": "601234567"},
-        "JAN-10452": {"nazwa": "POL-FRUT SP. Z O.O.", "tel": "509876543"}
-    }
+# --- FUNKCJE POBIERANIA/ZAPISYWANIA SŁOWNIKÓW Z FIREBASE ---
+def pobierz_slownik_firebase(url, domyslny_slownik):
+    try:
+        res = requests.get(url)
+        if res.status_code == 200 and res.json():
+            return res.json()
+        else:
+            # Jeśli baza jest pusta, inicjalizujemy ją danymi domyślnymi
+            requests.put(url, data=json.dumps(domyslny_slownik))
+            return domyslny_slownik
+    except:
+        return domyslny_slownik
+
+# Inicjalizacja słowników trwale połączonych z Firebase
+DOMYSLNI_DOSTAWCY = {
+    "JAN-11199": {"nazwa": "MARCIN PRZEWORSKI", "tel": "601234567"},
+    "JAN-10023": {"nazwa": "AGRO-HURT JANUSZ", "tel": "601234567"},
+    "JAN-10452": {"nazwa": "POL-FRUT SP. Z O.O.", "tel": "509876543"}
+}
+DOMYSLNI_PRACOWNICY = {
+    "M-01": "Zbigniew Tkaczyk",
+    "M-02": "Jan Kowalski",
+    "M-03": "Mariusz Nowak",
+    "M-04": "Piotr Zieliński"
+}
+
+baza_dostawcow = pobierz_slownik_firebase(FIREBASE_KONTRAHENCI_URL, DOMYSLNI_DOSTAWCY)
+baza_pracownikow = pobierz_slownik_firebase(FIREBASE_PRACOWNICY_URL, DOMYSLNI_PRACOWNICY)
+
 if "lista_towarow" not in st.session_state:
     st.session_state["lista_towarow"] = ["ARBUZ LUZ", "ZIEMNIAK WCZESNY LUZ", "ZIEMNIAK LUZ", "KAPUSTA PEKIŃSKA LUZ", "KAPUSTA WŁOSKA LUZ"]
 if "palety_tir" not in st.session_state:
     st.session_state["palety_tir"] = []
-if "lista_magazynierow" not in st.session_state:
-    st.session_state["lista_magazynierow"] = ["Zbigniew Tkaczyk", "Jan Kowalski", "Mariusz Nowak", "Piotr Zieliński"]
 
 # GENERATOR DOCUMENTS PDF
 def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img, qr_img_bytes):
@@ -145,19 +168,25 @@ st.header("1. Dane Dostawy i Kontrahenta")
 automatyczna_data = datetime.today().strftime('%Y-%m-%d %H:%M')
 st.info(f"📅 Data i godzina przyjęcia (Auto): **{automatyczna_data}**")
 
-opcje_dostawcow = {k: f"{v['nazwa']} ({k})" for k, v in st.session_state["baza_dostawcow"].items()}
+opcje_dostawcow = {k: f"{v['nazwa']} ({k})" for k, v in baza_dostawcow.items()}
 wybrany_id = st.selectbox("Wybierz dostawcę z bazy:", options=list(opcje_dostawcow.keys()), format_func=lambda x: opcje_dostawcow[x])
 
 nowy_dostawca_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO DOSTAWCY ]")
 if nowy_dostawca_chk:
     nowa_nazwa = st.text_input("Nazwa nowego dostawcy:")
     nowy_tel = st.text_input("Numer telefonu komórkowego (9 cyfr):", max_chars=9)
-    if st.button("💾 ZAPISZ DOSTAWCĘ W BAZIE"):
+    if st.button("💾 ZAPISZ DOSTAWCĘ TRWALE W CHMURZE"):
         if nowa_nazwa and len(nowy_tel) == 9 and nowy_tel.isdigit():
             wylosowane_id = f"JAN-{random.randint(11000, 99999)}"
-            st.session_state["baza_dostawcow"][wylosowane_id] = {"nazwa": nowa_nazwa.upper(), "tel": nowy_tel}
-            st.success("✅ Dodano dostawcę.")
-            st.rerun()
+            # Natychmiastowy zapis pojedynczego wpisu do Firebase
+            try:
+                requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci/{wylosowane_id}.json", data=json.dumps({"nazwa": nowa_nazwa.upper(), "tel": nowy_tel}))
+                st.success(f"✅ Dostawca {nowa_nazwa.upper()} został zapisany w bazie Firebase!")
+                st.rerun()
+            except:
+                st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
+        else:
+            st.error("❌ Podaj poprawną nazwę oraz 9-cyfrowy numer telefonu!")
 
 st.write("---")
 
@@ -168,7 +197,7 @@ wybrany_towar = st.selectbox("Wybierz rodzaj towaru:", options=st.session_state[
 nowy_towar_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO ASORTYMENTU ]")
 if nowy_towar_chk:
     dodaj_towar_nazwa = st.text_input("Wpisz nową nazwę towaru:")
-    if st.button("💾 ZAPISZ NOWY ASORTYMENT"):
+    if st.button("💾 ZAPISZ ASORTYMENT"):
         if dodaj_towar_nazwa:
             st.session_state["lista_towarow"].append(dodaj_towar_nazwa.upper())
             st.rerun()
@@ -260,14 +289,21 @@ st.header("5. Podpis Dostawcy i Autoryzacja")
 st.markdown("✍️ ... Podpisz się palcem w ramce:")
 canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
 
-wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=st.session_state["lista_magazynierow"] + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
+# Mapujemy unikalne opcje magazynierów pobranych z Firebase
+opcje_magazynierów = list(baza_pracownikow.values())
+wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=opcje_magazynierów + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
 
 if wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
     nowy_m_imie = st.text_input("Wpisz Imię i Nazwisko nowego pracownika:")
-    if st.button("💾 ZAPISZ MAGAZYNIERA"):
+    if st.button("💾 ZAPISZ MAGAZYNIERA TRWALE W CHMURZE"):
         if nowy_m_imie:
-            st.session_state["lista_magazynierow"].append(nowy_m_imie.strip())
-            st.rerun()
+            nowe_m_id = f"M-{random.randint(10, 99)}"
+            try:
+                requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy/{nowe_m_id}.json", data=json.dumps(nowy_m_imie.strip()))
+                st.success(f"✅ Pracownik {nowy_m_imie.strip()} dopisany trwale do Firebase!")
+                st.rerun()
+            except:
+                st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
 
 if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
     if st.session_state["status_jakosci"] == "NIEWYBRANY":
@@ -286,7 +322,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         id_losowe = str(random.randint(10000, 99999))
         rok_biezacy = datetime.today().strftime('%Y')
         losowy_nr_pz = f"PZ_{id_losowe}_{rok_biezacy}"
-        dane_d_koncowe = st.session_state["baza_dostawcow"][wybrany_id]
+        dane_d_koncowe = baza_dostawcow[wybrany_id]
         
         # ZAPIS DANYCH DO FIREBASE
         payload = {
@@ -314,7 +350,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         except:
             st.error("⚠️ Problem z siecią.")
 
-        # GENEROWANIE TRANSMISYJNEGO KODU QR (BEZPOŚREDNI LINK DO TELEFONU HANDLOWCA)
+        # GENEROWANIE TRANSMISYJNEGO KODU QR (LINK DO TELEFONU HANDLOWCA)
         link_dla_handlowca = f"https://janmar-wms-biuro-jgtio5bge3ogkstnnlpa9j.streamlit.app/?p={losowy_nr_pz}"
         
         qr = qrcode.QRCode(version=1, box_size=10, border=1)
