@@ -15,7 +15,7 @@ from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# KONFIGURACJA POŁĄCZENIA FIREBASE (BEZPIECZNY FOLDER)
+# KONFIGURACJA POŁĄCZENIA FIREBASE
 FIREBASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app/janmar_wms_rampa.json"
 
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
@@ -48,8 +48,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.7 🔓")
-st.subheader("System połączony online z bezpieczną bazą Firebase")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.8 🔓")
+st.subheader("Wersja z pełnym linkowaniem kodów QR dla handlowców")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -191,8 +191,8 @@ ilosc_palet_dostarczonych = 0
 
 if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     ilosc_szt_kg_laczna = st.number_input("Łączna ilość towaru (kg / szt):", min_value=0.0, value=0.0)
-    ilosc_opakowan_laczna = st.number_input("Ilość przywiezienych skrzynek:", min_value=0, value=0)
-    ilosc_palet_dostarczonych = st.number_input("Ilość przywiezienych palet:", min_value=0, value=0)
+    ilosc_opakowan_laczna = st.number_input("Ilość przywiezionych skrzynek:", min_value=0, value=0)
+    ilosc_palet_dostarczonych = st.number_input("Ilość przywiezionych palet:", min_value=0, value=0)
     waga_netto_laczna = ilosc_szt_kg_laczna
 else:
     col1, col2, col3 = st.columns(3)
@@ -288,7 +288,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         losowy_nr_pz = f"PZ_{id_losowe}_{rok_biezacy}"
         dane_d_koncowe = st.session_state["baza_dostawcow"][wybrany_id]
         
-        # ZAPIS DANYCH DO FIREBASE (BEZPIECZNY FOLDER)
+        # ZAPIS DANYCH DO FIREBASE
         payload = {
             "nr_pz": losowy_nr_pz.replace("_", "/"),
             "data": automatyczna_data,
@@ -309,13 +309,14 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         }
         
         try:
-            requests.put(f"https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app/janmar_wms_rampa/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.success("☁️ Dane zostały przesłane bezpiecznie do Firebase!")
+            requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
+            st.success("☁️ Dane przesłane do Firebase!")
         except:
-            st.error("⚠️ Problem z siecią, ale dokument PDF zostanie wygenerowany lokalnie.")
+            st.error("⚠️ Problem z siecią.")
 
-        # GENEROWANIE KODU QR (Zawiera unikalny link do bazy dla handlowca)
-        link_dla_handlowca = f"{losowy_nr_pz}"
+        # GENEROWANIE TRANSMISYJNEGO KODU QR (BEZPOŚREDNI LINK DO TELEFONU HANDLOWCA)
+        link_dla_handlowca = f"https://janmar-wms-biuro-jgtio5bge3ogkstnnlpa9j.streamlit.app/?p={losowy_nr_pz}"
+        
         qr = qrcode.QRCode(version=1, box_size=10, border=1)
         qr.add_data(link_dla_handlowca)
         qr.make(fit=True)
