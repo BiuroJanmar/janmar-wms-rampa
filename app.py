@@ -20,6 +20,7 @@ FIREBASE_BASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebas
 FIREBASE_URL = f"{FIREBASE_BASE_URL}/janmar_wms_rampa.json"
 FIREBASE_KONTRAHENCI_URL = f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci.json"
 FIREBASE_PRACOWNICY_URL = f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy.json"
+FIREBASE_ASORTYMENT_URL = f"{FIREBASE_BASE_URL}/janmar_wms_asortyment.json"
 
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
 
@@ -51,8 +52,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.0 ☁️")
-st.subheader("Wersja z trwałą bazą kontrahentów i pracowników w Firebase")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.1 ☁️")
+st.subheader("Wersja z pełną synchronizacją Kontrahentów, Pracowników i Asortymentu")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -67,7 +68,6 @@ def pobierz_slownik_firebase(url, domyslny_slownik):
         if res.status_code == 200 and res.json():
             return res.json()
         else:
-            # Jeśli baza jest pusta, inicjalizujemy ją danymi domyślnymi
             requests.put(url, data=json.dumps(domyslny_slownik))
             return domyslny_slownik
     except:
@@ -85,12 +85,18 @@ DOMYSLNI_PRACOWNICY = {
     "M-03": "Mariusz Nowak",
     "M-04": "Piotr Zieliński"
 }
+DOMYSLNY_ASORTYMENT = {
+    "A-01": "ARBUZ LUZ",
+    "A-02": "ZIEMNIAK WCZESNY LUZ",
+    "A-03": "ZIEMNIAK LUZ",
+    "A-04": "KAPUSTA PEKIŃSKA LUZ",
+    "A-05": "KAPUSTA WŁOSKA LUZ"
+}
 
 baza_dostawcow = pobierz_slownik_firebase(FIREBASE_KONTRAHENCI_URL, DOMYSLNI_DOSTAWCY)
 baza_pracownikow = pobierz_slownik_firebase(FIREBASE_PRACOWNICY_URL, DOMYSLNI_PRACOWNICY)
+baza_asortymentu = pobierz_slownik_firebase(FIREBASE_ASORTYMENT_URL, DOMYSLNY_ASORTYMENT)
 
-if "lista_towarow" not in st.session_state:
-    st.session_state["lista_towarow"] = ["ARBUZ LUZ", "ZIEMNIAK WCZESNY LUZ", "ZIEMNIAK LUZ", "KAPUSTA PEKIŃSKA LUZ", "KAPUSTA WŁOSKA LUZ"]
 if "palety_tir" not in st.session_state:
     st.session_state["palety_tir"] = []
 
@@ -178,7 +184,6 @@ if nowy_dostawca_chk:
     if st.button("💾 ZAPISZ DOSTAWCĘ TRWALE W CHMURZE"):
         if nowa_nazwa and len(nowy_tel) == 9 and nowy_tel.isdigit():
             wylosowane_id = f"JAN-{random.randint(11000, 99999)}"
-            # Natychmiastowy zapis pojedynczego wpisu do Firebase
             try:
                 requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci/{wylosowane_id}.json", data=json.dumps({"nazwa": nowa_nazwa.upper(), "tel": nowy_tel}))
                 st.success(f"✅ Dostawca {nowa_nazwa.upper()} został zapisany w bazie Firebase!")
@@ -192,15 +197,21 @@ st.write("---")
 
 # KROK 2: ASORTYMENT
 st.header("2. Asortyment i Opakowania")
-wybrany_towar = st.selectbox("Wybierz rodzaj towaru:", options=st.session_state["lista_towarow"])
+opcje_asortymentu = list(baza_asortymentu.values())
+wybrany_towar = st.selectbox("Wybierz rodzaj towaru:", options=opcje_asortymentu)
 
 nowy_towar_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO ASORTYMENTU ]")
 if nowy_towar_chk:
     dodaj_towar_nazwa = st.text_input("Wpisz nową nazwę towaru:")
-    if st.button("💾 ZAPISZ ASORTYMENT"):
+    if st.button("💾 ZAPISZ ASORTYMENT TRWALE W CHMURZE"):
         if dodaj_towar_nazwa:
-            st.session_state["lista_towarow"].append(dodaj_towar_nazwa.upper())
-            st.rerun()
+            nowy_t_id = f"A-{random.randint(100, 999)}"
+            try:
+                requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_asortyment/{nowy_t_id}.json", data=json.dumps(dodaj_towar_nazwa.upper().strip()))
+                st.success(f"✅ Towar {dodaj_towar_nazwa.upper().strip()} dopisany trwale do Firebase!")
+                st.rerun()
+            except:
+                st.error("❌ Błąd sieci! Nie udało się zapisać towaru w Firebase.")
 
 rodzaj_opakowania = st.radio("Rodzaj packagingu towaru:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
 szczegoly_opakowania = "Luz/Brak"
@@ -276,7 +287,7 @@ with c3:
 komentarz_jakosc = "Zgodny z normami."
 if st.session_state["status_jakosci"] == "ZIELONY":
     st.markdown('<div class="status-box" style="background-color: #2ecc71;">🟢 JAKOŚĆ OK - TOWAR PRZYJĘTY</div>', unsafe_allow_html=True)
-elif st.session_state["status_jakosci"] == "POMARAŃCZOWY":
+elif st.session_state["status_jakosci"] == "POMARAŃAWY":
     st.markdown('<div class="status-box" style="background-color: #f39c12;">🟠 PRZYJĘCIE WARUNKOWE</div>', unsafe_allow_html=True)
     komentarz_jakosc = st.selectbox("Powód:", ["TOWAR PRZYJĘTY WARUNKOWO DO ROZLICZENIA PO SPRZEDAŻY PRZEZ KUPCA", "UBYTEK WAGI POWYŻEJ TOLERANCJI", "WIDOCZNE USZKODZENIA MECHANICZNE / TRANSPORTOWE", "ODKŁOSY/OZNAKI PSUCIA – WYMACHUJE PRZEBRANIA NA MAGAZYNIE"])
 elif st.session_state["status_jakosci"] == "CZERWONY":
@@ -289,7 +300,6 @@ st.header("5. Podpis Dostawcy i Autoryzacja")
 st.markdown("✍️ ... Podpisz się palcem w ramce:")
 canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
 
-# Mapujemy unikalne opcje magazynierów pobranych z Firebase
 opcje_magazynierów = list(baza_pracownikow.values())
 wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=opcje_magazynierów + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
 
