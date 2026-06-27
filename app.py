@@ -23,11 +23,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA")
-st.subheader("Nowy projekt: janmar-wms-rampa (v1.0)")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.2")
+st.subheader("Pełna wersja z saldem opakowań i ręcznym dodawaniem danych")
 st.write("---")
 
-# Bazy danych w pamięci podręcznej
+# Bazy danych w pamięci podręcznej (Session State)
 if "baza_dostawcow" not in st.session_state:
     st.session_state["baza_dostawcow"] = {
         "JAN-11199": {"nazwa": "MARCIN PRZEWORSKI", "tel": "601234567"},
@@ -41,8 +41,8 @@ if "palety_tir" not in st.session_state:
 if "lista_magazynierow" not in st.session_state:
     st.session_state["lista_magazynierow"] = ["Zbigniew Tkaczyk", "Jan Kowalski", "Mariusz Nowak", "Piotr Zieliński"]
 
-# GENERATOR DOKUMENTU PDF PZ
-def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, rodzaj_palety, przywiezione_pal, netto, status, uwagi, osoba_prow, podpis_img):
+# GENERATOR DOKUMENTU PDF PZ (Z OPAKOWANIAMI I SALDEM)
+def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottom=30)
     story = []
@@ -54,11 +54,11 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, rodzaj_palety
     story.append(Paragraph(f"<b>DOKUMENT PZ - PRZYJĘCIE ZEWNĘTRZNE nr: {nr_pz}</b>", title_style))
     story.append(Spacer(1, 15))
     
-    status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCZOWY' else '#e74c3c')
+    status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCWY' else '#e74c3c')
     
     dane_ogolne = [
         [Paragraph(f"<b>Nabywca / Magazyn:</b><br/>GPW JANMAR SP. Z O.O.<br/>ul. Gołaśka 3/58, Kraków", sub_style),
-         Paragraph(f"<b>Dostawca:</b><br/>{dostawca_dane['nazwa']}<br/>ID: {dostawca_id}", sub_style)],
+         Paragraph(f"<b>Dostawca:</b><br/>{dostawca_dane['nazwa']}<br/>ID: {dostawca_id}<br/>Tel: {dostawca_dane.get('tel', '-')}", sub_style)],
         [Paragraph(f"<b>Data dostawy:</b> {data}<br/><b>Sporządził:</b> {osoba_prow}", sub_style),
          Paragraph(f"<font color='{status_kolor}'><b>STATUS JAKOŚCI: {status}</b></font><br/>Uwagi: {uwagi}", sub_style)]
     ]
@@ -68,12 +68,13 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, rodzaj_palety
     story.append(Spacer(1, 20))
     
     tabela_towarowa = [
-        ["Parametr rozliczeniowy", "Ilość zweryfikowana na rampie"],
-        [f"Towar: {towar}", f"{netto} kg / szt."],
-        [f"Typ palet: {rodzaj_palety}", f"{przywiezione_pal} szt."]
+        ["Parametr rozliczeniowy", "Dostarczono (Wjazd)", "Pobrano (Wyjazd)", "Saldo Końcowe"],
+        [f"Towar: {towar}", f"{netto} kg / szt.", "-", f"{netto} kg / szt."],
+        [f"Opakowania ({opakowanie_str})", f"{przywiezione_op} szt.", f"{pobrane_op} szt.", f"{przywiezione_op - pobrane_op} szt."],
+        [f"Palety ({paleta_str})", f"{przywiezione_pal} szt.", f"{pobrane_pal} szt.", f"{przywiezione_pal - pobrane_pal} szt."]
     ]
-    t_towarowa = Table(tabela_towarowa, colWidths=[300, 240])
-    t_towarowa.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#1F497D')), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D9D9D9')), ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8)]))
+    t_towarowa = Table(tabela_towarowa, colWidths=[200, 110, 110, 120])
+    t_towarowa.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('ALIGN', (1,0), (-1,-1), 'CENTER'), ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#1F497D')), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D9D9D9')), ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8)]))
     story.append(t_towarowa)
     story.append(Spacer(1, 40))
     
@@ -94,50 +95,98 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, rodzaj_palety
     buffer.seek(0)
     return buffer.getvalue()
 
-# KROK 1: DOSTAWCA
+# KROK 1: DOSTAWCA (Z RĘCZNYM DODAWANIEM + TELEFON)
 st.header("1. Dane Dostawy i Kontrahenta")
 automatyczna_data = datetime.today().strftime('%Y-%m-%d %H:%M')
 st.info(f"📅 Data i godzina przyjęcia (Auto): **{automatyczna_data}**")
+
 opcje_dostawcow = {k: f"{v['nazwa']} ({k})" for k, v in st.session_state["baza_dostawcow"].items()}
 wybrany_id = st.selectbox("Wybierz dostawcę z bazy:", options=list(opcje_dostawcow.keys()), format_func=lambda x: opcje_dostawcow[x])
+
+nowy_dostawca_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO DOSTAWCY ]")
+if nowy_dostawca_chk:
+    nowa_nazwa = st.text_input("Nazwa nowego dostawcy:")
+    nowy_tel = st.text_input("Numer telefonu komórkowego (9 cyfr):", max_chars=9)
+    if st.button("💾 ZAPISZ DOSTAWCĘ W BAZIE"):
+        if nowa_nazwa and len(nowy_tel) == 9 and nowy_tel.isdigit():
+            wylosowane_id = f"JAN-{random.randint(11000, 99999)}"
+            st.session_state["baza_dostawcow"][wylosowane_id] = {"nazwa": nowa_nazwa.upper(), "tel": nowy_tel}
+            st.success("✅ Dodano dostawcę. Wybierz go z listy powyżej.")
+            st.rerun()
+
 st.write("---")
 
-# KROK 2: ASORTYMENT
+# KROK 2: ASORTYMENT (Z RĘCZNYM DODAWANIEM ORAZ OPAKOWANIAMI)
 st.header("2. Asortyment i Opakowania")
 wybrany_towar = st.selectbox("Wybierz rodzaj towaru:", options=st.session_state["lista_towarow"])
+
+nowy_towar_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO ASORTYMENTU ]")
+if nowy_towar_chk:
+    dodaj_towar_nazwa = st.text_input("Wpisz nową nazwę towaru:")
+    if st.button("💾 ZAPISZ NOWY ASORTYMENT"):
+        if dodaj_towar_nazwa:
+            st.session_state["lista_towarow"].append(dodaj_towar_nazwa.upper())
+            st.success("✅ Dodano towar do listy.")
+            st.rerun()
+
+rodzaj_opakowania = st.radio("Rodzaj opakowania towaru:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
+szczegoly_opakowania = "Luz/Brak"
+if rodzaj_opakowania == "OPAKOWANIE WYMIENNE":
+    szczegoly_opakowania = st.selectbox("Wybierz typ opakowania wymiennego:", options=["KARTON JANMAR", "ŁUSZCZKA JANMAR", "SKRZYNIA JANMAR", "WŁASNOŚĆ DOSTAWCY", "OPAKOWANIE IFCO", "OPAKOWANIE EPS"])
+
 rodzaj_palety = st.selectbox("Towar przyjechał na palecie:", ["PALETA EURO", "PALETA JEDNORAZOWA", "LUZEM (BEZ PALET)"])
 st.write("---")
 
-# KROK 3: WAGI
+# KROK 3: WAGI I SALDA OPAKOWAŃ (WYDAWKA)
 st.header("3. Rejestracja Ilości i Wag")
 tryb_przyjecia = st.radio("Wybierz gabaryt dostawy:", ["SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)", "ROZŁADUNEK TIR (Ważenie paletowe)"])
+
 waga_netto_laczna = 0.0
+ilosc_opakowan_laczna = 0
 ilosc_palet_dostarczonych = 0
 
 if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
-    ilosc_szt_kg_laczna = st.number_input("Łączna ilość towaru:", min_value=0.0, value=0.0)
-    ilosc_palet_dostarczonych = st.number_input("Ilość dostarczonych palet:", min_value=0, value=0)
+    ilosc_szt_kg_laczna = st.number_input("Łączna ilość towaru (kg / szt):", min_value=0.0, value=0.0)
+    ilosc_opakowan_laczna = st.number_input("Ilość przywiezionych skrzynek:", min_value=0, value=0)
+    ilosc_palet_dostarczonych = st.number_input("Ilość przywiezionych palet:", min_value=0, value=0)
     waga_netto_laczna = ilosc_szt_kg_laczna
 else:
     col1, col2, col3 = st.columns(3)
     with col1: waga_brutto_p = st.number_input("Waga BRUTTO palety (kg):", min_value=0.0, value=0.0)
     with col2: ilosc_op_p = st.number_input("Ilość skrzynek na palecie (szt):", min_value=0, value=0)
     with col3: waga_jednego_op = st.number_input("Waga skrzynki (tara - kg):", min_value=0.0, value=0.5, step=0.1)
+    
     tara_palety_sztywna = 25.0 if rodzaj_palety == "PALETA EURO" else 15.0
     if rodzaj_palety == "LUZEM (BEZ PALET)": tara_palety_sztywna = 0.0
-    netto_palety_wyliczone = max(0.0, waga_brutto_p - (tara_palety_sztywna + (ilosc_op_p * waga_jednego_op)))
+    tara_laczna_palety = tara_palety_sztywna + (ilosc_op_p * waga_jednego_op)
+    netto_palety_wyliczone = max(0.0, waga_brutto_p - tara_laczna_palety)
+    
     st.warning(f"🧮 Wyliczone NETTO dla tej palety: **{netto_palety_wyliczone} kg**")
     if st.button("➕ ZATWIERDŹ I ZWAŻ NASTĘPNĄ PALETĘ"):
         if waga_brutto_p > 0 and ilosc_op_p > 0:
-            st.session_state["palety_tir"].append({"paleta_nr": len(st.session_state["palety_tir"]) + 1, "netto": netto_palety_wyliczone})
+            st.session_state["palety_tir"].append({"paleta_nr": len(st.session_state["palety_tir"]) + 1, "opakowania": ilosc_op_p, "netto": netto_palety_wyliczone})
             st.rerun()
+            
     if st.session_state["palety_tir"]:
         waga_netto_laczna = sum(p['netto'] for p in st.session_state["palety_tir"])
+        ilosc_opakowan_laczna = sum(p['opakowania'] for p in st.session_state["palety_tir"])
         ilosc_palet_dostarczonych = len(st.session_state["palety_tir"])
-        st.markdown(f"**RAZEM Z TIR-A:** Palet: `{ilosc_palet_dostarczonych}` | NETTO: `{waga_netto_laczna} kg`")
+        st.markdown(f"**RAZEM Z TIR-A:** Palet: `{ilosc_palet_dostarczonych}` | Skrzynek: `{ilosc_opakowan_laczna}` | NETTO: `{waga_netto_laczna} kg`")
         if st.button("🗑️ RESETUJ PALETY"):
             st.session_state["palety_tir"] = []
             st.rerun()
+
+st.markdown("### 🔄 Saldo Wydawki (Co dostawca zabiera ze sobą)")
+ilosc_opakowan_pobranych = 0
+ilosc_palet_pobranych = 0
+col_op, col_pal = st.columns(2)
+with col_op:
+    nie_op = st.checkbox("✅ NIE POBIERA OPAKOWAŃ POWROTNYCH", value=True)
+    if not nie_op: ilosc_opakowan_pobranych = st.number_input("Ilość ODRZUCONYCH/POBRANYCH skrzynek:", min_value=0, value=0)
+with col_pal:
+    nie_pal = st.checkbox("✅ NIE POBIERA PALET POWROTNYCH", value=True)
+    if not nie_pal: ilosc_palet_pobranych = st.number_input("Ilość ZWROCONYCH/POBRANYCH palet:", min_value=0, value=0)
+
 st.write("---")
 
 # KROK 4: JAKOŚĆ
@@ -162,16 +211,26 @@ elif st.session_state["status_jakosci"] == "CZERWONY":
     komentarz_jakosc = st.text_input("Uzasadnienie (wymagane):")
 st.write("---")
 
-# KROK 5: PODPIS I ZATWIERDZENIE
+# KROK 5: PODPIS I RĘCZNY MAGAZYNIER
 st.header("5. Podpis Dostawcy i Autoryzacja")
-st.markdown("✍️ **Kierowco: Podpisz się palcem w ramce:**")
+st.markdown("✍ ... Podpisz się palcem w ramce:")
 canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
 
-wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=st.session_state["lista_magazynierow"])
+wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=st.session_state["lista_magazynierow"] + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
+
+if wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
+    nowy_m_imie = st.text_input("Wpisz Imię i Nazwisko nowego pracownika:")
+    if st.button("💾 ZAPISZ MAGAZYNIERA"):
+        if nowy_m_imie:
+            st.session_state["lista_magazynierow"].append(nowy_m_imie.strip())
+            st.success("✅ Dodano. Wybierz pracownika z listy powyżej.")
+            st.rerun()
 
 if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
     if st.session_state["status_jakosci"] == "NIEWYBRANY":
         st.error("❌ Wybierz status jakości!")
+    elif wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
+        st.error("❌ Wybierz konkretnego pracownika!")
     elif canvas_result.image_data is None:
         st.error("❌ Brak podpisu kierowcy!")
     else:
@@ -183,7 +242,12 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         dane_d_koncowe = st.session_state["baza_dostawcow"][wybrany_id]
         losowy_nr_pz = f"PZ/{random.randint(10000,99999)}/{datetime.today().strftime('%Y')}"
         
-        pdf_data = generuj_pdf_pz(losowy_nr_pz, automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar, rodzaj_palety, ilosc_palet_dostarczonych, waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil)
+        pdf_data = generuj_pdf_pz(
+            losowy_nr_pz, automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
+            f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
+            ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
+            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil
+        )
         
-        st.success(f"🎉 DOSTAWA ZATWIERDZONA POMYŚLNIE! Numer PZ: {losowy_nr_pz}")
-        st.download_button(label="📥 POBIERZ DOKUMENT PZ (PDF)", data=pdf_data, file_name=f"PZ_{losowy_nr_pz.replace('/','_')}.pdf", mime="application/pdf")
+        st.success(f"🎉 DOSTAWA ZATWIERDZONA! Numer PZ: {losowy_nr_pz}")
+        st.download_button(label="📥 POBIERZ RAPORT PZ (PDF Z PODPISEM)", data=pdf_data, file_name=f"PZ_{losowy_nr_pz.replace('/','_')}.pdf", mime="application/pdf")
