@@ -1,6 +1,8 @@
 import streamlit as st
 import random
 import qrcode
+import requests
+import json
 from datetime import datetime
 from io import BytesIO
 from streamlit_drawable_canvas import st_canvas
@@ -13,7 +15,9 @@ from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# Konfiguracja ekranu pod tablet na magazynie
+# KONFIGURACJA POŁĄCZENIA FIREBASE (BEZPIECZNY FOLDER)
+FIREBASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app/janmar_wms_rampa.json"
+
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
 
 # --- ZABEZPIECZENIE HASŁEM ---
@@ -44,8 +48,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.6 🔓")
-st.subheader("Wersja z etykietami QR na palety dostawców")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.7 🔓")
+st.subheader("System połączony online z bezpieczną bazą Firebase")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -67,7 +71,7 @@ if "palety_tir" not in st.session_state:
 if "lista_magazynierow" not in st.session_state:
     st.session_state["lista_magazynierow"] = ["Zbigniew Tkaczyk", "Jan Kowalski", "Mariusz Nowak", "Piotr Zieliński"]
 
-# GENERATOR DOKUMENTU PDF PZ Z PODPISEM I KODEM QR
+# GENERATOR DOCUMENTS PDF
 def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img, qr_img_bytes):
     try:
         pdfmetrics.registerFont(TTFont('PolishFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
@@ -187,8 +191,8 @@ ilosc_palet_dostarczonych = 0
 
 if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     ilosc_szt_kg_laczna = st.number_input("Łączna ilość towaru (kg / szt):", min_value=0.0, value=0.0)
-    ilosc_opakowan_laczna = st.number_input("Ilość przywiezionych skrzynek:", min_value=0, value=0)
-    ilosc_palet_dostarczonych = st.number_input("Ilość przywiezionych palet:", min_value=0, value=0)
+    ilosc_opakowan_laczna = st.number_input("Ilość przywiezienych skrzynek:", min_value=0, value=0)
+    ilosc_palet_dostarczonych = st.number_input("Ilość przywiezienych palet:", min_value=0, value=0)
     waga_netto_laczna = ilosc_szt_kg_laczna
 else:
     col1, col2, col3 = st.columns(3)
@@ -278,11 +282,42 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         img_array = np.array(canvas_result.image_data)
         podpis_pil = PILImage.fromarray(img_array.astype('uint8'), 'RGBA')
         
-        losowy_nr_pz = f"PZ/{random.randint(10000,99999)}/{datetime.today().strftime('%Y')}"
+        # ID i nazwa dokumentu
+        id_losowe = str(random.randint(10000, 99999))
+        rok_biezacy = datetime.today().strftime('%Y')
+        losowy_nr_pz = f"PZ_{id_losowe}_{rok_biezacy}"
+        dane_d_koncowe = st.session_state["baza_dostawcow"][wybrany_id]
         
-        # Generowanie kodu QR
+        # ZAPIS DANYCH DO FIREBASE (BEZPIECZNY FOLDER)
+        payload = {
+            "nr_pz": losowy_nr_pz.replace("_", "/"),
+            "data": automatyczna_data,
+            "dostawca_id": wybrany_id,
+            "dostawca_nazwa": dane_d_koncowe['nazwa'],
+            "dostawca_tel": dane_d_koncowe.get('tel', '-'),
+            "towar": wybrany_towar,
+            "opakowanie_typ": f"{rodzaj_opakowania} - {szczegoly_opakowania}",
+            "opakowania_przywiezione": int(ilosc_opakowan_laczna),
+            "opakowania_pobrane": int(ilosc_opakowan_pobranych),
+            "palety_typ": rodzaj_palety,
+            "palety_przywiezione": int(ilosc_palet_dostarczonych),
+            "palety_pobrane": int(ilosc_palet_pobranych),
+            "netto": float(waga_netto_laczna),
+            "status_jakosci": st.session_state["status_jakosci"],
+            "uwagi": komentarz_jakosc,
+            "magazynier": wybrany_magazynier
+        }
+        
+        try:
+            requests.put(f"https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app/janmar_wms_rampa/{losowy_nr_pz}.json", data=json.dumps(payload))
+            st.success("☁️ Dane zostały przesłane bezpiecznie do Firebase!")
+        except:
+            st.error("⚠️ Problem z siecią, ale dokument PDF zostanie wygenerowany lokalnie.")
+
+        # GENEROWANIE KODU QR (Zawiera unikalny link do bazy dla handlowca)
+        link_dla_handlowca = f"{losowy_nr_pz}"
         qr = qrcode.QRCode(version=1, box_size=10, border=1)
-        qr.add_data(losowy_nr_pz)
+        qr.add_data(link_dla_handlowca)
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white")
         
@@ -290,30 +325,23 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         qr_img.save(qr_io, format='PNG')
         qr_io.seek(0)
         
-        dane_d_koncowe = st.session_state["baza_dostawcow"][wybrany_id]
-        
         pdf_data = generuj_pdf_pz(
-            losowy_nr_pz, automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
+            losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
             ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
             waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
         )
         
-        st.success(f"🎉 DOSTAWĘ ZATWIERDZONO! Numer PZ: {losowy_nr_pz}")
-        
-        # SEKCJA ETYKIETY NA PALETĘ
         st.write("---")
         st.markdown("### 🏷️ ETYKIETA NA PALETĘ (DLA HANDLOWCA)")
-        st.write("Wydrukuj ten kod QR i naklej na paletę:")
         st.image(qr_io, width=250)
         
-        # Przycisk pobierania samej czystej etykiety jako obrazek PNG
         st.download_button(
             label="🖨️ POBIERZ SAM KOD QR (NA PALETĘ)",
             data=qr_io.getvalue(),
-            file_name=f"KOD_QR_{losowy_nr_pz.replace('/','_')}.png",
+            file_name=f"KOD_QR_{losowy_nr_pz}.png",
             mime="image/png"
         )
         
         st.write("---")
-        st.download_button(label="📥 POBIERZ PEŁNY RAPORT PZ (PDF)", data=pdf_data, file_name=f"PZ_{losowy_nr_pz.replace('/','_')}.pdf", mime="application/pdf")
+        st.download_button(label="📥 POBIERZ PEŁNY RAPORT PZ (PDF)", data=pdf_data, file_name=f"PZ_{losowy_nr_pz}.pdf", mime="application/pdf")
