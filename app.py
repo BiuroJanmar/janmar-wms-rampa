@@ -4,11 +4,13 @@ from datetime import datetime
 from io import BytesIO
 from streamlit_drawable_canvas import st_canvas
 
-# Importy do generowania bezpiecznego PDF z polskimi znakami
+# Importy do generowania PDF i rejestracji zewnętrznych czcionek TTF
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 # Konfiguracja ekranu pod tablet na magazynie
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
@@ -23,8 +25,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.3")
-st.subheader("Pełna wersja: Poprawione polskie czcionki i układ PDF")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.4")
+st.subheader("Wersja z pełnym kodowaniem polskich znaków TTF")
 st.write("---")
 
 # Bazy danych w pamięci podręcznej (Session State)
@@ -41,19 +43,31 @@ if "palety_tir" not in st.session_state:
 if "lista_magazynierow" not in st.session_state:
     st.session_state["lista_magazynierow"] = ["Zbigniew Tkaczyk", "Jan Kowalski", "Mariusz Nowak", "Piotr Zieliński"]
 
-# GENERATOR DOKUMENTU PDF PZ (Z POLSKIMI ZNAKAMI I SZEROKIMI KOLUMNAMI)
+# GENERATOR DOKUMENTU PDF PZ
 def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img):
+    
+    # REJESTRACJA CZCIONKI Z PEŁNYM WSPARCIEM POLSKICH ZNAKÓW (TrueType)
+    try:
+        pdfmetrics.registerFont(TTFont('PolishFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+        pdfmetrics.registerFont(TTFont('PolishFont-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
+        f_regular = 'PolishFont'
+        f_bold = 'PolishFont-Bold'
+    except:
+        # Awaryjny font, gdyby system miał inną ścieżkę (standard w ReportLab)
+        f_regular = 'Helvetica'
+        f_bold = 'Helvetica-Bold'
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottom=30)
     story = []
     styles = getSampleStyleSheet()
     
-    # Wymuszenie kodowania Helvetica-Bold i Helvetica ze wsparciem dla PL znaków
-    title_style = ParagraphStyle('TitleStyle', fontName='Helvetica-Bold', fontSize=20, leading=24, textColor=colors.HexColor('#1F497D'), alignment=1)
-    sub_style = ParagraphStyle('SubStyle', fontName='Helvetica', fontSize=11, leading=15)
-    header_table_style = ParagraphStyle('HeaderTableStyle', fontName='Helvetica-Bold', fontSize=10, leading=12, textColor=colors.white, alignment=1)
-    cell_table_style = ParagraphStyle('CellTableStyle', fontName='Helvetica', fontSize=10, leading=12, alignment=0)
-    cell_table_center = ParagraphStyle('CellTableCenter', fontName='Helvetica', fontSize=10, leading=12, alignment=1)
+    # Style oparte na zarejestrowanej polskiej czcionce TTF
+    title_style = ParagraphStyle('TitleStyle', fontName=f_bold, fontSize=18, leading=22, textColor=colors.HexColor('#1F497D'), alignment=1)
+    sub_style = ParagraphStyle('SubStyle', fontName=f_regular, fontSize=10, leading=14)
+    header_table_style = ParagraphStyle('HeaderTableStyle', fontName=f_bold, fontSize=9, leading=11, textColor=colors.white, alignment=1)
+    cell_table_style = ParagraphStyle('CellTableStyle', fontName=f_regular, fontSize=9, leading=11, alignment=0)
+    cell_table_center = ParagraphStyle('CellTableCenter', fontName=f_regular, fontSize=9, leading=11, alignment=1)
     
     story.append(Paragraph(f"DOKUMENT PZ - PRZYJĘCIE ZEWNĘTRZNE nr: {nr_pz}", title_style))
     story.append(Spacer(1, 15))
@@ -71,7 +85,6 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     story.append(t_ogolne)
     story.append(Spacer(1, 20))
     
-    # Szerokie i precyzyjnie dobrane kolumny pod tekst (Razem 540 punktów szerokości tabeli)
     tabela_towarowa = [
         [Paragraph("Parametr rozliczeniowy", header_table_style), Paragraph("Dostarczono (Wjazd)", header_table_style), Paragraph("Pobrano (Wyjazd)", header_table_style), Paragraph("Saldo Końcowe", header_table_style)],
         [Paragraph(f"Towar: {towar}", cell_table_style), Paragraph(f"{netto} kg/szt.", cell_table_center), Paragraph("-", cell_table_center), Paragraph(f"{netto} kg/szt.", cell_table_center)],
@@ -100,7 +113,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     buffer.seek(0)
     return buffer.getvalue()
 
-# KROK 1: DOSTAWCA (Z RĘCZNYM DODAWANIEM + TELEFON)
+# KROK 1: DOSTAWCA
 st.header("1. Dane Dostawy i Kontrahenta")
 automatyczna_data = datetime.today().strftime('%Y-%m-%d %H:%M')
 st.info(f"📅 Data i godzina przyjęcia (Auto): **{automatyczna_data}**")
@@ -121,7 +134,7 @@ if nowy_dostawca_chk:
 
 st.write("---")
 
-# KROK 2: ASORTYMENT (Z RĘCZNYM DODAWANIEM ORAZ OPAKOWANIAMI)
+# KROK 2: ASORTYMENT
 st.header("2. Asortyment i Opakowania")
 wybrany_towar = st.selectbox("Wybierz rodzaj towaru:", options=st.session_state["lista_towarow"])
 
@@ -142,7 +155,7 @@ if rodzaj_opakowania == "OPAKOWANIE WYMIENNE":
 rodzaj_palety = st.selectbox("Towar przyjechał na palecie:", ["PALETA EURO", "PALETA JEDNORAZOWA", "LUZEM (BEZ PALET)"])
 st.write("---")
 
-# KROK 3: WAGI I SALDA OPAKOWAŃ (WYDAWKA)
+# KROK 3: WAGI I SALDA
 st.header("3. Rejestracja Ilości i Wag")
 tryb_przyjecia = st.radio("Wybierz gabaryt dostawy:", ["SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)", "ROZŁADUNEK TIR (Ważenie paletowe)"])
 
@@ -216,7 +229,7 @@ elif st.session_state["status_jakosci"] == "CZERWONY":
     komentarz_jakosc = st.text_input("Uzasadnienie (wymagane):")
 st.write("---")
 
-# KROK 5: PODPIS I RĘCZNY MAGAZYNIER
+# KROK 5: PODPIS
 st.header("5. Podpis Dostawcy i Autoryzacja")
 st.markdown("✍️ ... Podpisz się palcem w ramce:")
 canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
@@ -237,7 +250,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
     elif wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
         st.error("❌ Wybierz konkretnego pracownika!")
     elif canvas_result.image_data is None:
-        st.error("❌ Brak podpisu kierowcy!")
+        st.error("❌ Brak podpisów kierowcy!")
     else:
         from PIL import Image as PILImage
         import numpy as np
