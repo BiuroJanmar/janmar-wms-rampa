@@ -1,10 +1,11 @@
 import streamlit as st
 import random
+import qrcode
 from datetime import datetime
 from io import BytesIO
 from streamlit_drawable_canvas import st_canvas
 
-# Importy do generowania PDF i rejestracji zewnętrznych czcionek TTF
+# Importy do generowania PDF
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -23,21 +24,16 @@ if not st.session_state["autoryzowany"]:
     st.title("🏭 JANMAR WMS - PANEL RAMPOWY")
     st.write("---")
     st.subheader("🔒 Dostęp zablokowany. Wprowadź hasło magazynowe:")
-    
-    # Pole na hasło (zamienia znaki na kropki)
     haslo_input = st.text_input("Hasło dostępu:", type="password")
-    
     if st.button("🔓 ZALOGUJ DO SYSTEMU"):
         if haslo_input == "Janmar2026":
             st.session_state["autoryzowany"] = True
-            st.success("✅ Hasło poprawne! Ładowanie systemu...")
             st.rerun()
         else:
-            st.error("❌ Błędne hasło! Spróbuj ponownie.")
-    st.stop() # Zatrzymuje wykonywanie kodu, dopóki hasło nie jest poprawne
+            st.error("❌ Błędne hasło!")
+    st.stop()
 
-# --- JEŚLI HASŁO JEST POPRAWNE, URUCHAMIA SIĘ RESZTA APLIKACJI ---
-
+# --- CSS STYLIZACJA ---
 st.markdown("""
     <style>
     html, body, [data-testid="stWidgetLabel"] p { font-size: 20px !important; font-weight: 600 !important; }
@@ -48,17 +44,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.4 🔓")
-st.subheader("Wersja z pełnym kodowaniem polskich znaków TTF")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v1.6 🔓")
+st.subheader("Wersja z etykietami QR na palety dostawców")
 
-# Przycisk wylogowania w rogu dla bezpieczeństwa
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
     st.rerun()
 
 st.write("---")
 
-# Bazy danych w pamięci podręcznej (Session State)
+# Bazy danych w pamięci sesji
 if "baza_dostawcow" not in st.session_state:
     st.session_state["baza_dostawcow"] = {
         "JAN-11199": {"nazwa": "MARCIN PRZEWORSKI", "tel": "601234567"},
@@ -72,8 +67,8 @@ if "palety_tir" not in st.session_state:
 if "lista_magazynierow" not in st.session_state:
     st.session_state["lista_magazynierow"] = ["Zbigniew Tkaczyk", "Jan Kowalski", "Mariusz Nowak", "Piotr Zieliński"]
 
-# GENERATOR DOKUMENTU PDF PZ
-def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img):
+# GENERATOR DOKUMENTU PDF PZ Z PODPISEM I KODEM QR
+def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img, qr_img_bytes):
     try:
         pdfmetrics.registerFont(TTFont('PolishFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
         pdfmetrics.registerFont(TTFont('PolishFont-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
@@ -119,19 +114,22 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     t_towarowa = Table(tabela_towarowa, colWidths=[250, 100, 95, 95])
     t_towarowa.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#1F497D')), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D9D9D9')), ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8)]))
     story.append(t_towarowa)
-    story.append(Spacer(1, 40))
+    story.append(Spacer(1, 30))
     
     podpis_kierowcy_io = BytesIO()
     podpis_img.save(podpis_kierowcy_io, format='PNG')
     podpis_kierowcy_io.seek(0)
-    img_reportlab = Image(podpis_kierowcy_io, width=120, height=50)
+    img_podpis = Image(podpis_kierowcy_io, width=120, height=50)
+    
+    img_qr = Image(qr_img_bytes, width=70, height=70)
     
     tabela_podpisow = [
         [Paragraph(f"<b>Podpis Magazyniera Janmar:</b><br/><br/>............................................<br/>{osoba_prow}", sub_style),
-         Paragraph("<b>Podpisano na tablecie przez Dostawcę:</b>", sub_style), img_reportlab]
+         Paragraph("<b>Podpis Dostawcy:</b>", sub_style), img_podpis,
+         Paragraph("<b>KOD SYSTEMOWY BIURA:</b>", sub_style), img_qr]
     ]
-    t_podpisy = Table(tabela_podpisow, colWidths=[240, 180, 120])
-    t_podpisy.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM')]))
+    t_podpisy = Table(tabela_podpisow, colWidths=[170, 90, 110, 100, 70])
+    t_podpisy.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM'), ('ALIGN', (4,0), (4,0), 'RIGHT')]))
     story.append(t_podpisy)
     
     doc.build(story)
@@ -154,7 +152,7 @@ if nowy_dostawca_chk:
         if nowa_nazwa and len(nowy_tel) == 9 and nowy_tel.isdigit():
             wylosowane_id = f"JAN-{random.randint(11000, 99999)}"
             st.session_state["baza_dostawcow"][wylosowane_id] = {"nazwa": nowa_nazwa.upper(), "tel": nowy_tel}
-            st.success("✅ Dodano dostawcę. Wybierz go z listy powyżej.")
+            st.success("✅ Dodano dostawcę.")
             st.rerun()
 
 st.write("---")
@@ -169,7 +167,6 @@ if nowy_towar_chk:
     if st.button("💾 ZAPISZ NOWY ASORTYMENT"):
         if dodaj_towar_nazwa:
             st.session_state["lista_towarow"].append(dodaj_towar_nazwa.upper())
-            st.success("✅ Dodano towar do listy.")
             st.rerun()
 
 rodzaj_opakowania = st.radio("Rodzaj packagingu towaru:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
@@ -219,7 +216,7 @@ else:
             st.session_state["palety_tir"] = []
             st.rerun()
 
-st.markdown("### 🔄 Saldo Wydawki (Co dostawca zabiera ze sobą)")
+st.markdown("### 🔄 Saldo Wydawki")
 ilosc_opakowan_pobranych = 0
 ilosc_palet_pobranych = 0
 col_op, col_pal = st.columns(2)
@@ -254,7 +251,7 @@ elif st.session_state["status_jakosci"] == "CZERWONY":
     komentarz_jakosc = st.text_input("Uzasadnienie (wymagane):")
 st.write("---")
 
-# KROK 5: PODPIS
+# KROK 5: PODPIS DOSTAWCY
 st.header("5. Podpis Dostawcy i Autoryzacja")
 st.markdown("✍️ ... Podpisz się palcem w ramce:")
 canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
@@ -266,7 +263,6 @@ if wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
     if st.button("💾 ZAPISZ MAGAZYNIERA"):
         if nowy_m_imie:
             st.session_state["lista_magazynierow"].append(nowy_m_imie.strip())
-            st.success("✅ Dodano. Wybierz pracownika z listy powyżej.")
             st.rerun()
 
 if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
@@ -282,15 +278,42 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         img_array = np.array(canvas_result.image_data)
         podpis_pil = PILImage.fromarray(img_array.astype('uint8'), 'RGBA')
         
-        dane_d_koncowe = st.session_state["baza_dostawcow"][wybrany_id]
         losowy_nr_pz = f"PZ/{random.randint(10000,99999)}/{datetime.today().strftime('%Y')}"
+        
+        # Generowanie kodu QR
+        qr = qrcode.QRCode(version=1, box_size=10, border=1)
+        qr.add_data(losowy_nr_pz)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+        
+        qr_io = BytesIO()
+        qr_img.save(qr_io, format='PNG')
+        qr_io.seek(0)
+        
+        dane_d_koncowe = st.session_state["baza_dostawcow"][wybrany_id]
         
         pdf_data = generuj_pdf_pz(
             losowy_nr_pz, automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
             ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
-            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil
+            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
         )
         
-        st.success(f"🎉 DOSTAWA ZATWIERDZONA! Numer PZ: {losowy_nr_pz}")
-        st.download_button(label="📥 POBIERZ RAPORT PZ (PDF Z PODPISEM)", data=pdf_data, file_name=f"PZ_{losowy_nr_pz.replace('/','_')}.pdf", mime="application/pdf")
+        st.success(f"🎉 DOSTAWĘ ZATWIERDZONO! Numer PZ: {losowy_nr_pz}")
+        
+        # SEKCJA ETYKIETY NA PALETĘ
+        st.write("---")
+        st.markdown("### 🏷️ ETYKIETA NA PALETĘ (DLA HANDLOWCA)")
+        st.write("Wydrukuj ten kod QR i naklej na paletę:")
+        st.image(qr_io, width=250)
+        
+        # Przycisk pobierania samej czystej etykiety jako obrazek PNG
+        st.download_button(
+            label="🖨️ POBIERZ SAM KOD QR (NA PALETĘ)",
+            data=qr_io.getvalue(),
+            file_name=f"KOD_QR_{losowy_nr_pz.replace('/','_')}.png",
+            mime="image/png"
+        )
+        
+        st.write("---")
+        st.download_button(label="📥 POBIERZ PEŁNY RAPORT PZ (PDF)", data=pdf_data, file_name=f"PZ_{losowy_nr_pz.replace('/','_')}.pdf", mime="application/pdf")
