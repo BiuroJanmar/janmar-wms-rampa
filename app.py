@@ -3,6 +3,7 @@ import random
 import qrcode
 import requests
 import json
+import base64
 from datetime import datetime
 from io import BytesIO
 from streamlit_drawable_canvas import st_canvas
@@ -24,7 +25,6 @@ FIREBASE_ASORTYMENT_URL = f"{FIREBASE_BASE_URL}/janmar_wms_asortyment.json"
 
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
 
-# --- ZABEZPIECZENIE HASŁEM ---
 if "autoryzowany" not in st.session_state:
     st.session_state["autoryzowany"] = False
 
@@ -41,7 +41,6 @@ if not st.session_state["autoryzowany"]:
             st.error("❌ Błędne hasło!")
     st.stop()
 
-# --- CSS STYLIZACJA ---
 st.markdown("""
     <style>
     html, body, [data-testid="stWidgetLabel"] p { font-size: 20px !important; font-weight: 600 !important; }
@@ -52,8 +51,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.2 ☁️")
-st.subheader("Wersja ze sprostowaną oceną warunkową (Żółte światło)")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.3 ☁️")
+st.subheader("Wersja z pełnym zapisem pliku PDF do chmury")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -61,7 +60,6 @@ if st.button("🔒 WYLOGUJ Z PANELU"):
 
 st.write("---")
 
-# --- FUNKCJE POBIERANIA/ZAPISYWANIA SŁOWNIKÓW Z FIREBASE ---
 def pobierz_slownik_firebase(url, domyslny_slownik):
     try:
         res = requests.get(url)
@@ -73,7 +71,6 @@ def pobierz_slownik_firebase(url, domyslny_slownik):
     except:
         return domyslny_slownik
 
-# Inicjalizacja słowników trwale połączonych z Firebase
 DOMYSLNI_DOSTAWCY = {
     "JAN-11199": {"nazwa": "MARCIN PRZEWORSKI", "tel": "601234567"},
     "JAN-10023": {"nazwa": "AGRO-HURT JANUSZ", "tel": "601234567"},
@@ -100,7 +97,6 @@ baza_asortymentu = pobierz_slownik_firebase(FIREBASE_ASORTYMENT_URL, DOMYSLNY_AS
 if "palety_tir" not in st.session_state:
     st.session_state["palety_tir"] = []
 
-# GENERATOR DOCUMENTS PDF
 def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img, qr_img_bytes):
     try:
         pdfmetrics.registerFont(TTFont('PolishFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
@@ -189,7 +185,7 @@ if nowy_dostawca_chk:
                 st.success(f"✅ Dostawca {nowa_nazwa.upper()} został zapisany w bazie Firebase!")
                 st.rerun()
             except:
-                st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
+                st.error("❌ Błąd sieci!")
         else:
             st.error("❌ Podaj poprawną nazwę oraz 9-cyfrowy numer telefonu!")
 
@@ -211,7 +207,7 @@ if nowy_towar_chk:
                 st.success(f"✅ Towar {dodaj_towar_nazwa.upper().strip()} dopisany trwale do Firebase!")
                 st.rerun()
             except:
-                st.error("❌ Błąd sieci! Nie udało się zapisać towaru w Firebase.")
+                st.error("❌ Błąd sieci!")
 
 rodzaj_opakowania = st.radio("Rodzaj packagingu towaru:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
 szczegoly_opakowania = "Luz/Brak"
@@ -310,10 +306,10 @@ if wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
             nowe_m_id = f"M-{random.randint(10, 99)}"
             try:
                 requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy/{nowe_m_id}.json", data=json.dumps(nowy_m_imie.strip()))
-                st.success(f"✅ Pracownik {nowy_m_imie.strip()} dopisany trwale do Firebase!")
+                st.success(f"✅ Pracownik {nowy_m_imie.strip()} dopisany!")
                 st.rerun()
             except:
-                st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
+                st.error("❌ Błąd sieci!")
 
 if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
     if st.session_state["status_jakosci"] == "NIEWYBRANY":
@@ -328,13 +324,33 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         img_array = np.array(canvas_result.image_data)
         podpis_pil = PILImage.fromarray(img_array.astype('uint8'), 'RGBA')
         
-        # ID i nazwa dokumentu
         id_losowe = str(random.randint(10000, 99999))
         rok_biezacy = datetime.today().strftime('%Y')
         losowy_nr_pz = f"PZ_{id_losowe}_{rok_biezacy}"
         dane_d_koncowe = baza_dostawcow[wybrany_id]
         
-        # ZAPIS DANYCH DO FIREBASE
+        link_dla_handlowca = f"https://janmar-wms-biuro-jgtio5bge3ogkstnnlpa9j.streamlit.app/?p={losowy_nr_pz}"
+        
+        qr = qrcode.QRCode(version=1, box_size=10, border=1)
+        qr.add_data(link_dla_handlowca)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+        
+        qr_io = BytesIO()
+        qr_img.save(qr_io, format='PNG')
+        qr_io.seek(0)
+        
+        # 📄 GENERUJEMY PEŁNY PDF LOKALNIE
+        pdf_bytes = generuj_pdf_pz(
+            losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
+            f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
+            ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
+            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
+        )
+        
+        # 🔏 ZAMIENIAMY PLIK PDF NA TEKST BASE64 DO FIREBASE
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        
         payload = {
             "nr_pz": losowy_nr_pz.replace("_", "/"),
             "data": automatyczna_data,
@@ -351,34 +367,16 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             "netto": float(waga_netto_laczna),
             "status_jakosci": st.session_state["status_jakosci"],
             "uwagi": komentarz_jakosc,
-            "magazynier": wybrany_magazynier
+            "magazynier": wybrany_magazynier,
+            "pdf_raw": pdf_base64  # <--- To wysyła kompletny plik z podpisem na serwer
         }
         
         try:
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.success("☁️ Dane przesłane do Firebase!")
+            st.success("☁️ Oryginalny raport PDF został przesłany do chmury Firebase!")
         except:
             st.error("⚠️ Problem z siecią.")
 
-        # GENEROWANIE TRANSMISYJNEGO KODU QR (LINK DO TELEFONU HANDLOWCA)
-        link_dla_handlowca = f"https://janmar-wms-biuro-jgtio5bge3ogkstnnlpa9j.streamlit.app/?p={losowy_nr_pz}"
-        
-        qr = qrcode.QRCode(version=1, box_size=10, border=1)
-        qr.add_data(link_dla_handlowca)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white")
-        
-        qr_io = BytesIO()
-        qr_img.save(qr_io, format='PNG')
-        qr_io.seek(0)
-        
-        pdf_data = generuj_pdf_pz(
-            losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
-            f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
-            ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
-            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
-        )
-        
         st.write("---")
         st.markdown("### 🏷️ ETYKIETA NA PALETĘ (DLA HANDLOWCA)")
         st.image(qr_io, width=250)
@@ -391,4 +389,4 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         )
         
         st.write("---")
-        st.download_button(label="📥 POBIERZ PEŁNY RAPORT PZ (PDF)", data=pdf_data, file_name=f"PZ_{losowy_nr_pz}.pdf", mime="application/pdf")
+        st.download_button(label="📥 POBIERZ PEŁNY RAPORT PZ (PDF)", data=pdf_bytes, file_name=f"PZ_{losowy_nr_pz}.pdf", mime="application/pdf")
