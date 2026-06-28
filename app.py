@@ -52,8 +52,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.1 ☁️")
-st.subheader("Wersja z pełną synchronizacją Kontrahentów, Pracowników i Asortymentu")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.2 ☁️")
+st.subheader("Wersja ze sprostowaną oceną warunkową (Żółte światło)")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -287,7 +287,7 @@ with c3:
 komentarz_jakosc = "Zgodny z normami."
 if st.session_state["status_jakosci"] == "ZIELONY":
     st.markdown('<div class="status-box" style="background-color: #2ecc71;">🟢 JAKOŚĆ OK - TOWAR PRZYJĘTY</div>', unsafe_allow_html=True)
-elif st.session_state["status_jakosci"] == "POMARAŃAWY":
+elif st.session_state["status_jakosci"] == "POMARAŃCZOWY":
     st.markdown('<div class="status-box" style="background-color: #f39c12;">🟠 PRZYJĘCIE WARUNKOWE</div>', unsafe_allow_html=True)
     komentarz_jakosc = st.selectbox("Powód:", ["TOWAR PRZYJĘTY WARUNKOWO DO ROZLICZENIA PO SPRZEDAŻY PRZEZ KUPCA", "UBYTEK WAGI POWYŻEJ TOLERANCJI", "WIDOCZNE USZKODZENIA MECHANICZNE / TRANSPORTOWE", "ODKŁOSY/OZNAKI PSUCIA – WYMACHUJE PRZEBRANIA NA MAGAZYNIE"])
 elif st.session_state["status_jakosci"] == "CZERWONY":
