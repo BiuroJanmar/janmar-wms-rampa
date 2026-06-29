@@ -2,3 +2,5 @@ reportlab
 streamlit-drawable-canvas
 qrcode
 requests
+google-auth
+google-api-python-client
