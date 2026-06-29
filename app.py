@@ -3,10 +3,12 @@ import random
 import qrcode
 import requests
 import json
-import base64
 from datetime import datetime
 from io import BytesIO
 from streamlit_drawable_canvas import st_canvas
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 
 # Importy do generowania PDF
 from reportlab.lib.pagesizes import letter
@@ -25,13 +27,51 @@ FIREBASE_ASORTYMENT_URL = f"{FIREBASE_BASE_URL}/janmar_wms_asortyment.json"
 
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
 
+# AUTORYZACJA GOOGLE DRIVE
+def pobierz_google_drive_service():
+    info = dict(st.secrets["gcp_service_account"])
+    # Naprawa znaków nowej linii w kluczu prywatnym
+    info["private_key"] = info["private_key"].replace("\\n", "\n")
+    credentials = service_account.Credentials.from_service_account_info(info)
+    scoped_credentials = credentials.with_scopes(['https://www.googleapis.com/auth/drive'])
+    return build('drive', 'v3', credentials=scoped_credentials)
+
+def przeslij_pdf_na_google_drive(file_bytes, file_name):
+    try:
+        service = pobierz_google_drive_service()
+        
+        # Szukanie folderu JANMAR_WMS_PZ_RAPORTY
+        folder_id = None
+        q = "mimeType='application/vnd.google-apps.folder' and name='JANMAR_WMS_PZ_RAPORTY' and trashed=false"
+        results = service.files().list(q=q, fields="files(id, name)").execute()
+        items = results.get('files', [])
+        
+        if items:
+            folder_id = items[0]['id']
+        else:
+            file_metadata = {'name': 'JANMAR_WMS_PZ_RAPORTY', 'mimeType': 'application/vnd.google-apps.folder'}
+            folder = service.files().create(body=file_metadata, fields='id').execute()
+            folder_id = folder.get('id')
+            
+        # Przesyłanie pliku do folderu
+        file_metadata = {'name': file_name, 'parents': [folder_id]}
+        media = MediaIoBaseUpload(BytesIO(file_bytes), mime_type='application/pdf', resumable=True)
+        file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+        
+        # Uprawnienia widoczności dla każdego, kto ma link
+        service.permissions().create(fileId=file.get('id'), body={'type': 'anyone', 'role': 'reader'}).execute()
+        
+        return file.get('webViewLink')
+    except Exception as e:
+        st.error(f"❌ Błąd zapisu na Dysku Google: {e}")
+        return None
+
 if "autoryzowany" not in st.session_state:
     st.session_state["autoryzowany"] = False
 
 if not st.session_state["autoryzowany"]:
     st.title("🏭 JANMAR WMS - PANEL RAMPOWY")
     st.write("---")
-    st.subheader("🔒 Dostęp zablokowany. Wprowadź hasło magazynowe:")
     haslo_input = st.text_input("Hasło dostępu:", type="password")
     if st.button("🔓 ZALOGUJ DO SYSTEMU"):
         if haslo_input == "Janmar2026":
@@ -51,13 +91,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.3 ☁️")
-st.subheader("Wersja z pełnym zapisem pliku PDF do chmury")
-
-if st.button("🔒 WYLOGUJ Z PANELU"):
-    st.session_state["autoryzowany"] = False
-    st.rerun()
-
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.4 ☁️")
 st.write("---")
 
 def pobierz_slownik_firebase(url, domyslny_slownik):
@@ -73,22 +107,10 @@ def pobierz_slownik_firebase(url, domyslny_slownik):
 
 DOMYSLNI_DOSTAWCY = {
     "JAN-11199": {"nazwa": "MARCIN PRZEWORSKI", "tel": "601234567"},
-    "JAN-10023": {"nazwa": "AGRO-HURT JANUSZ", "tel": "601234567"},
-    "JAN-10452": {"nazwa": "POL-FRUT SP. Z O.O.", "tel": "509876543"}
+    "JAN-10023": {"nazwa": "AGRO-HURT JANUSZ", "tel": "601234567"}
 }
-DOMYSLNI_PRACOWNICY = {
-    "M-01": "Zbigniew Tkaczyk",
-    "M-02": "Jan Kowalski",
-    "M-03": "Mariusz Nowak",
-    "M-04": "Piotr Zieliński"
-}
-DOMYSLNY_ASORTYMENT = {
-    "A-01": "ARBUZ LUZ",
-    "A-02": "ZIEMNIAK WCZESNY LUZ",
-    "A-03": "ZIEMNIAK LUZ",
-    "A-04": "KAPUSTA PEKIŃSKA LUZ",
-    "A-05": "KAPUSTA WŁOSKA LUZ"
-}
+DOMYSLNI_PRACOWNICY = {"M-01": "Zbigniew Tkaczyk", "M-02": "Jan Kowalski"}
+DOMYSLNY_ASORTYMENT = {"A-01": "ARBUZ LUZ", "A-02": "ZIEMNIAK LUZ"}
 
 baza_dostawcow = pobierz_slownik_firebase(FIREBASE_KONTRAHENCI_URL, DOMYSLNI_DOSTAWCY)
 baza_pracownikow = pobierz_slownik_firebase(FIREBASE_PRACOWNICY_URL, DOMYSLNI_PRACOWNICY)
@@ -124,9 +146,9 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCZOWY' else '#e74c3c')
     
     dane_ogolne = [
-        [Paragraph(f"<b>Nabywca / Magazyn:</b><br/>GPW JANMAR SP. Z O.O.<br/>ul. Gołaśka 3/58, Kraków", sub_style),
-         Paragraph(f"<b>Dostawca:</b><br/>{dostawca_dane['nazwa']}<br/>ID: {dostawca_id}<br/>Tel: {dostawca_dane.get('tel', '-')}", sub_style)],
-        [Paragraph(f"<b>Data dostawy:</b> {data}<br/><b>Sporządził:</b> {osoba_prow}", sub_style),
+        [Paragraph(f"<b>Nabywca:</b> GPW JANMAR SP. Z O.O.", sub_style),
+         Paragraph(f"<b>Dostawca:</b> {dostawca_dane['nazwa']} ({dostawca_id})", sub_style)],
+        [Paragraph(f"<b>Data dostawy:</b> {data}<br/><b>Magazynier:</b> {osoba_prow}", sub_style),
          Paragraph(f"<font color='{status_kolor}'><b>STATUS JAKOŚCI: {status}</b></font><br/>Uwagi: {uwagi}", sub_style)]
     ]
     t_ogolne = Table(dane_ogolne, colWidths=[270, 270])
@@ -135,13 +157,13 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     story.append(Spacer(1, 20))
     
     tabela_towarowa = [
-        [Paragraph("Parametr rozliczeniowy", header_table_style), Paragraph("Dostarczono (Wjazd)", header_table_style), Paragraph("Pobrano (Wyjazd)", header_table_style), Paragraph("Saldo Końcowe", header_table_style)],
-        [Paragraph(f"Towar: {towar}", cell_table_style), Paragraph(f"{netto} kg/szt.", cell_table_center), Paragraph("-", cell_table_center), Paragraph(f"{netto} kg/szt.", cell_table_center)],
+        [Paragraph("Parametr rozliczeniowy", header_table_style), Paragraph("Dostarczono", header_table_style), Paragraph("Pobrano", header_table_style), Paragraph("Saldo", header_table_style)],
+        [Paragraph(f"Towar: {towar}", cell_table_style), Paragraph(f"{netto} kg.", cell_table_center), Paragraph("-", cell_table_center), Paragraph(f"{netto} kg.", cell_table_center)],
         [Paragraph(f"Opakowania ({opakowanie_str})", cell_table_style), Paragraph(f"{przywiezione_op} szt.", cell_table_center), Paragraph(f"{pobrane_op} szt.", cell_table_center), Paragraph(f"{przywiezione_op - pobrane_op} szt.", cell_table_center)],
         [Paragraph(f"Palety ({paleta_str})", cell_table_style), Paragraph(f"{przywiezione_pal} szt.", cell_table_center), Paragraph(f"{pobrane_pal} szt.", cell_table_center), Paragraph(f"{przywiezione_pal - pobrane_pal} szt.", cell_table_center)]
     ]
     t_towarowa = Table(tabela_towarowa, colWidths=[250, 100, 95, 95])
-    t_towarowa.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#1F497D')), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D9D9D9')), ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8)]))
+    t_towarowa.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#1F497D')), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D9D9D9'))]))
     story.append(t_towarowa)
     story.append(Spacer(1, 30))
     
@@ -149,176 +171,49 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     podpis_img.save(podpis_kierowcy_io, format='PNG')
     podpis_kierowcy_io.seek(0)
     img_podpis = Image(podpis_kierowcy_io, width=120, height=50)
-    
     img_qr = Image(qr_img_bytes, width=70, height=70)
     
     tabela_podpisow = [
-        [Paragraph(f"<b>Podpis Magazyniera Janmar:</b><br/><br/>............................................<br/>{osoba_prow}", sub_style),
+        [Paragraph(f"<b>Podpis Magazyniera:</b><br/>{osoba_prow}", sub_style),
          Paragraph("<b>Podpis Dostawcy:</b>", sub_style), img_podpis,
-         Paragraph("<b>KOD SYSTEMOWY BIURA:</b>", sub_style), img_qr]
+         Paragraph("<b>KOD QR BIURA:</b>", sub_style), img_qr]
     ]
     t_podpisy = Table(tabela_podpisow, colWidths=[170, 90, 110, 100, 70])
-    t_podpisy.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM'), ('ALIGN', (4,0), (4,0), 'RIGHT')]))
+    t_podpisy.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM')]))
     story.append(t_podpisy)
     
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
-# KROK 1: DOSTAWCA
-st.header("1. Dane Dostawy i Kontrahenta")
+# Sekcja formularza (Uproszczona na potrzeby integracji)
 automatyczna_data = datetime.today().strftime('%Y-%m-%d %H:%M')
-st.info(f"📅 Data i godzina przyjęcia (Auto): **{automatyczna_data}**")
-
 opcje_dostawcow = {k: f"{v['nazwa']} ({k})" for k, v in baza_dostawcow.items()}
-wybrany_id = st.selectbox("Wybierz dostawcę z bazy:", options=list(opcje_dostawcow.keys()), format_func=lambda x: opcje_dostawcow[x])
+wybrany_id = st.selectbox("Wybierz dostawcę:", options=list(opcje_dostawcow.keys()), format_func=lambda x: opcje_dostawcow[x])
 
-nowy_dostawca_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO DOSTAWCY ]")
-if nowy_dostawca_chk:
-    nowa_nazwa = st.text_input("Nazwa nowego dostawcy:")
-    nowy_tel = st.text_input("Numer telefonu komórkowego (9 cyfr):", max_chars=9)
-    if st.button("💾 ZAPISZ DOSTAWCĘ TRWALE W CHMURZE"):
-        if nowa_nazwa and len(nowy_tel) == 9 and nowy_tel.isdigit():
-            wylosowane_id = f"JAN-{random.randint(11000, 99999)}"
-            try:
-                requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci/{wylosowane_id}.json", data=json.dumps({"nazwa": nowa_nazwa.upper(), "tel": nowy_tel}))
-                st.success(f"✅ Dostawca {nowa_nazwa.upper()} został zapisany w bazie Firebase!")
-                st.rerun()
-            except:
-                st.error("❌ Błąd sieci!")
-        else:
-            st.error("❌ Podaj poprawną nazwę oraz 9-cyfrowy numer telefonu!")
-
-st.write("---")
-
-# KROK 2: ASORTYMENT
-st.header("2. Asortyment i Opakowania")
 opcje_asortymentu = list(baza_asortymentu.values())
-wybrany_towar = st.selectbox("Wybierz rodzaj towaru:", options=opcje_asortymentu)
+wybrany_towar = st.selectbox("Wybierz towar:", options=opcje_asortymentu)
 
-nowy_towar_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO ASORTYMENTU ]")
-if nowy_towar_chk:
-    dodaj_towar_nazwa = st.text_input("Wpisz nową nazwę towaru:")
-    if st.button("💾 ZAPISZ ASORTYMENT TRWALE W CHMURZE"):
-        if dodaj_towar_nazwa:
-            nowy_t_id = f"A-{random.randint(100, 999)}"
-            try:
-                requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_asortyment/{nowy_t_id}.json", data=json.dumps(dodaj_towar_nazwa.upper().strip()))
-                st.success(f"✅ Towar {dodaj_towar_nazwa.upper().strip()} dopisany trwale do Firebase!")
-                st.rerun()
-            except:
-                st.error("❌ Błąd sieci!")
+rodzaj_opakowania = st.radio("Opakowanie:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
+szczegoly_opakowania = "Luz"
+rodzaj_palety = st.selectbox("Paleta:", ["PALETA EURO", "PALETA JEDNORAZOWA"])
 
-rodzaj_opakowania = st.radio("Rodzaj packagingu towaru:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
-szczegoly_opakowania = "Luz/Brak"
-if rodzaj_opakowania == "OPAKOWANIE WYMIENNE":
-    szczegoly_opakowania = st.selectbox("Wybierz typ opakowania wymiennego:", options=["KARTON JANMAR", "ŁUSZCZKA JANMAR", "SKRZYNIA JANMAR", "WŁASNOŚĆ DOSTAWCY", "OPAKOWANIE IFCO", "OPAKOWANIE EPS"])
+waga_netto_laczna = st.number_input("Waga Netto (kg):", min_value=0.0, value=100.0)
+ilosc_opakowan_laczna = st.number_input("Ilość opakowań (szt):", min_value=0, value=10)
+ilosc_palet_dostarczonych = st.number_input("Ilość palet (szt):", min_value=0, value=1)
 
-rodzaj_palety = st.selectbox("Towar przyjechał na palecie:", ["PALETA EURO", "PALETA JEDNORAZOWA", "LUZEM (BEZ PALET)"])
-st.write("---")
-
-# KROK 3: WAGI I SALDA
-st.header("3. Rejestracja Ilości i Wag")
-tryb_przyjecia = st.radio("Wybierz gabaryt dostawy:", ["SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)", "ROZŁADUNEK TIR (Ważenie paletowe)"])
-
-waga_netto_laczna = 0.0
-ilosc_opakowan_laczna = 0
-ilosc_palet_dostarczonych = 0
-
-if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
-    ilosc_szt_kg_laczna = st.number_input("Łączna ilość towaru (kg / szt):", min_value=0.0, value=0.0)
-    ilosc_opakowan_laczna = st.number_input("Ilość przywiezionych skrzynek:", min_value=0, value=0)
-    ilosc_palet_dostarczonych = st.number_input("Ilość przywiezionych palet:", min_value=0, value=0)
-    waga_netto_laczna = ilosc_szt_kg_laczna
-else:
-    col1, col2, col3 = st.columns(3)
-    with col1: waga_brutto_p = st.number_input("Waga BRUTTO palety (kg):", min_value=0.0, value=0.0)
-    with col2: ilosc_op_p = st.number_input("Ilość skrzynek na palecie (szt):", min_value=0, value=0)
-    with col3: waga_jednego_op = st.number_input("Waga skrzynki (tara - kg):", min_value=0.0, value=0.5, step=0.1)
-    
-    tara_palety_sztywna = 25.0 if rodzaj_palety == "PALETA EURO" else 15.0
-    if rodzaj_palety == "LUZEM (BEZ PALET)": tara_palety_sztywna = 0.0
-    tara_laczna_palety = tara_palety_sztywna + (ilosc_op_p * waga_jednego_op)
-    netto_palety_wyliczone = max(0.0, waga_brutto_p - tara_laczna_palety)
-    
-    st.warning(f"🧮 Wyliczone NETTO dla tej palety: **{netto_palety_wyliczone} kg**")
-    if st.button("➕ ZATWIERDŹ I ZWAŻ NASTĘPNĄ PALETĘ"):
-        if waga_brutto_p > 0 and ilosc_op_p > 0:
-            st.session_state["palety_tir"].append({"paleta_nr": len(st.session_state["palety_tir"]) + 1, "opakowania": ilosc_op_p, "netto": netto_palety_wyliczone})
-            st.rerun()
-            
-    if st.session_state["palety_tir"]:
-        waga_netto_laczna = sum(p['netto'] for p in st.session_state["palety_tir"])
-        ilosc_opakowan_laczna = sum(p['opakowania'] for p in st.session_state["palety_tir"])
-        ilosc_palet_dostarczonych = len(st.session_state["palety_tir"])
-        st.markdown(f"**RAZEM Z TIR-A:** Palet: `{ilosc_palet_dostarczonych}` | Skrzynek: `{ilosc_opakowan_laczna}` | NETTO: `{waga_netto_laczna} kg`")
-        if st.button("🗑️ RESETUJ PALETY"):
-            st.session_state["palety_tir"] = []
-            st.rerun()
-
-st.markdown("### 🔄 Saldo Wydawki")
 ilosc_opakowan_pobranych = 0
 ilosc_palet_pobranych = 0
-col_op, col_pal = st.columns(2)
-with col_op:
-    nie_op = st.checkbox("✅ NIE POBIERA OPAKOWAŃ POWROTNYCH", value=True)
-    if not nie_op: ilosc_opakowan_pobranych = st.number_input("Ilość ODRZUCONYCH/POBRANYCH skrzynek:", min_value=0, value=0)
-with col_pal:
-    nie_pal = st.checkbox("✅ NIE POBIERA PALET POWROTNYCH", value=True)
-    if not nie_pal: ilosc_palet_pobranych = st.number_input("Ilość ZWROCONYCH/POBRANYCH palet:", min_value=0, value=0)
 
 st.write("---")
-
-# KROK 4: JAKOŚĆ
-st.header("4. Ocena Jakościowa Towaru")
-if "status_jakosci" not in st.session_state: st.session_state["status_jakosci"] = "NIEWYBRANY"
-c1, c2, c3 = st.columns(3)
-with c1:
-    if st.button("🟢 TOWAR OK"): st.session_state["status_jakosci"] = "ZIELONY"
-with c2:
-    if st.button("🟠 WARUNKOWY"): st.session_state["status_jakosci"] = "POMARAŃCZOWY"
-with c3:
-    if st.button("🔴 ZWROT"): st.session_state["status_jakosci"] = "CZERWONY"
-
+st.session_state["status_jakosci"] = st.radio("Jakość:", ["ZIELONY", "POMARAŃCZOWY", "CZERWONY"])
 komentarz_jakosc = "Zgodny z normami."
-if st.session_state["status_jakosci"] == "ZIELONY":
-    st.markdown('<div class="status-box" style="background-color: #2ecc71;">🟢 JAKOŚĆ OK - TOWAR PRZYJĘTY</div>', unsafe_allow_html=True)
-elif st.session_state["status_jakosci"] == "POMARAŃCZOWY":
-    st.markdown('<div class="status-box" style="background-color: #f39c12;">🟠 PRZYJĘCIE WARUNKOWE</div>', unsafe_allow_html=True)
-    komentarz_jakosc = st.selectbox("Powód:", ["TOWAR PRZYJĘTY WARUNKOWO DO ROZLICZENIA PO SPRZEDAŻY PRZEZ KUPCA", "UBYTEK WAGI POWYŻEJ TOLERANCJI", "WIDOCZNE USZKODZENIA MECHANICZNE / TRANSPORTOWE", "ODKŁOSY/OZNAKI PSUCIA – WYMACHUJE PRZEBRANIA NA MAGAZYNIE"])
-elif st.session_state["status_jakosci"] == "CZERWONY":
-    st.markdown('<div class="status-box" style="background-color: #e74c3c;">🔴 TOWAR ODRZUCONY - ZWROT</div>', unsafe_allow_html=True)
-    komentarz_jakosc = st.text_input("Uzasadnienie (wymagane):")
-st.write("---")
 
-# KROK 5: PODPIS DOSTAWCY
-st.header("5. Podpis Dostawcy i Autoryzacja")
-st.markdown("✍️ ... Podpisz się palcem w ramce:")
-canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
+canvas_result = st_canvas(fill_color="white", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
+wybrany_magazynier = st.selectbox("Magazynier:", options=opcje_magazynierów)
 
-opcje_magazynierów = list(baza_pracownikow.values())
-wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=opcje_magazynierów + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
-
-if wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
-    nowy_m_imie = st.text_input("Wpisz Imię i Nazwisko nowego pracownika:")
-    if st.button("💾 ZAPISZ MAGAZYNIERA TRWALE W CHMURZE"):
-        if nowy_m_imie:
-            nowe_m_id = f"M-{random.randint(10, 99)}"
-            try:
-                requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy/{nowe_m_id}.json", data=json.dumps(nowy_m_imie.strip()))
-                st.success(f"✅ Pracownik {nowy_m_imie.strip()} dopisany!")
-                st.rerun()
-            except:
-                st.error("❌ Błąd sieci!")
-
-if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
-    if st.session_state["status_jakosci"] == "NIEWYBRANY":
-        st.error("❌ Wybierz status jakości!")
-    elif wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
-        st.error("❌ Wybierz konkretnego pracownika!")
-    elif canvas_result.image_data is None:
-        st.error("❌ Brak podpisów kierowcy!")
-    else:
+if st.button("🔒 ZATWIERDŹ PRZYJĘCIE"):
+    if canvas_result.image_data is not None:
         from PIL import Image as PILImage
         import numpy as np
         img_array = np.array(canvas_result.image_data)
@@ -340,7 +235,6 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         qr_img.save(qr_io, format='PNG')
         qr_io.seek(0)
         
-        # 📄 GENERUJEMY PEŁNY PDF LOKALNIE
         pdf_bytes = generuj_pdf_pz(
             losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
@@ -348,45 +242,27 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
         )
         
-        # 🔏 ZAMIENIAMY PLIK PDF NA TEKST BASE64 DO FIREBASE
-        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        nazwa_pliku_pdf = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
+        drive_link = przeslij_pdf_na_google_drive(pdf_bytes, nazwa_pliku_pdf)
         
-        payload = {
-            "nr_pz": losowy_nr_pz.replace("_", "/"),
-            "data": automatyczna_data,
-            "dostawca_id": wybrany_id,
-            "dostawca_nazwa": dane_d_koncowe['nazwa'],
-            "dostawca_tel": dane_d_koncowe.get('tel', '-'),
-            "towar": wybrany_towar,
-            "opakowanie_typ": f"{rodzaj_opakowania} - {szczegoly_opakowania}",
-            "opakowania_przywiezione": int(ilosc_opakowan_laczna),
-            "opakowania_pobrane": int(ilosc_opakowan_pobranych),
-            "palety_typ": rodzaj_palety,
-            "palety_przywiezione": int(ilosc_palet_dostarczonych),
-            "palety_pobrane": int(ilosc_palet_pobranych),
-            "netto": float(waga_netto_laczna),
-            "status_jakosci": st.session_state["status_jakosci"],
-            "uwagi": komentarz_jakosc,
-            "magazynier": wybrany_magazynier,
-            "pdf_raw": pdf_base64  # <--- To wysyła kompletny plik z podpisem na serwer
-        }
-        
-        try:
+        if drive_link:
+            payload = {
+                "nr_pz": losowy_nr_pz.replace("_", "/"),
+                "data": automatyczna_data,
+                "dostawca_id": wybrany_id,
+                "dostawca_nazwa": dane_d_koncowe['nazwa'],
+                "towar": wybrany_towar,
+                "netto": float(waga_netto_laczna),
+                "opakowania_przywiezione": int(ilosc_opakowan_laczna),
+                "opakowania_pobrane": int(ilosc_opakowan_pobranych),
+                "palety_przywiezione": int(ilosc_palet_dostarczonych),
+                "palety_pobrane": int(ilosc_palet_pobranych),
+                "palety_typ": rodzaj_palety,
+                "status_jakosci": st.session_state["status_jakosci"],
+                "uwagi": komentarz_jakosc,
+                "magazynier": wybrany_magazynier,
+                "link_drive": drive_link
+            }
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.success("☁️ Oryginalny raport PDF został przesłany do chmury Firebase!")
-        except:
-            st.error("⚠️ Problem z siecią.")
-
-        st.write("---")
-        st.markdown("### 🏷️ ETYKIETA NA PALETĘ (DLA HANDLOWCA)")
-        st.image(qr_io, width=250)
-        
-        st.download_button(
-            label="🖨️ POBIERZ SAM KOD QR (NA PALETĘ)",
-            data=qr_io.getvalue(),
-            file_name=f"KOD_QR_{losowy_nr_pz}.png",
-            mime="image/png"
-        )
-        
-        st.write("---")
-        st.download_button(label="📥 POBIERZ PEŁNY RAPORT PZ (PDF)", data=pdf_bytes, file_name=f"PZ_{losowy_nr_pz}.pdf", mime="application/pdf")
+            st.success("☁️ Raport PZ zapisany na Google Drive i w bazie Firebase!")
+            st.image(qr_io, width=200)
