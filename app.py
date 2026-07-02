@@ -17,11 +17,6 @@ from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# Importy do Google Drive API
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
-
 # KONFIGURACJA POŁĄCZENIA FIREBASE
 FIREBASE_BASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app"
 FIREBASE_URL = f"{FIREBASE_BASE_URL}/janmar_wms_rampa.json"
@@ -29,57 +24,7 @@ FIREBASE_KONTRAHENCI_URL = f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci.json"
 FIREBASE_PRACOWNICY_URL = f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy.json"
 FIREBASE_ASORTYMENT_URL = f"{FIREBASE_BASE_URL}/janmar_wms_asortyment.json"
 
-# ID FOLDERU NA DYSKU GOOGLE (Twój zweryfikowany folder)
-GOOGLE_DRIVE_FOLDER_ID = "1BTbdDxdI1Nvzz9Nmc0qm7BAAWAl3z8hS"
-
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
-
-# --- POŁĄCZENIE Z GOOGLE DRIVE ---
-def pobierz_google_drive_service():
-    try:
-        info_klucza = json.loads(st.secrets["google_drive"]["service_account_info"])
-        credentials = service_account.Credentials.from_service_account_info(
-            info_klucza, scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build('drive', 'v3', credentials=credentials)
-    except Exception as e:
-        st.error(f"❌ Błąd autoryzacji Google Drive: {e}")
-        return None
-
-def przeslij_pdf_na_google_drive(file_bytes, file_name):
-    service = pobierz_google_drive_service()
-    if not service:
-        return None
-    try:
-        metadata_pliku = {
-            'name': file_name,
-            'parents': [GOOGLE_DRIVE_FOLDER_ID] if GOOGLE_DRIVE_FOLDER_ID else [],
-            'mimeType': 'application/pdf'
-        }
-        
-        # Poprawka: Zmiana resumable na False omija problem braku limitu miejsca (quota) dla konta usługowego
-        media = MediaIoBaseUpload(BytesIO(file_bytes), mimetype='application/pdf', resumable=False)
-        
-        plik = service.files().create(
-            body=metadata_pliku, 
-            media_body=media, 
-            fields='id, webViewLink',
-            supportsAllDrives=True
-        ).execute()
-        
-        try:
-            service.permissions().create(
-                fileId=plik.get('id'),
-                body={'type': 'anyone', 'role': 'reader'},
-                supportsAllDrives=True
-            ).execute()
-        except:
-            pass 
-            
-        return plik.get('webViewLink')
-    except Exception as e:
-        st.error(f"❌ Nie udało się wysłać pliku na Dysk Google: {e}")
-        return None
 
 # --- ZABEZPIECZENIE HASŁEM ---
 if "autoryzowany" not in st.session_state:
@@ -109,8 +54,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.4 ☁️")
-st.subheader("Wersja z automatyczną wysyłką PDF na Dysk Google")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.5 📦")
+st.subheader("Wersja stabilna z bezpośrednim pobieraniem PDF")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -170,7 +115,6 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottom=30)
     story = []
-    styles = getSampleStyleSheet()
     
     title_style = ParagraphStyle('TitleStyle', fontName=f_bold, fontSize=18, leading=22, textColor=colors.HexColor('#1F497D'), alignment=1)
     sub_style = ParagraphStyle('SubStyle', fontName=f_regular, fontSize=10, leading=14)
@@ -406,9 +350,9 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
         )
         
-        st.info("🔄 Zapisywanie nienaruszonego raportu PDF na Dysk Google Janmar...")
-        nazwa_pliku_pdf = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
-        drive_link = przeslij_pdf_na_google_drive(pdf_data, nazwa_pliku_pdf)
+        # Zapisujemy wygenerowany dokument do pamięci sesji, aby był dostępny do pobrania
+        st.session_state["ostatni_pdf"] = pdf_data
+        st.session_state["nazwa_ostatniego_pdf"] = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
         
         payload = {
             "nr_pz": losowy_nr_pz.replace("_", "/"),
@@ -427,12 +371,22 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             "status_jakosci": st.session_state["status_jakosci"],
             "uwagi": komentarz_jakosc,
             "magazynier": wybrany_magazynier,
-            "link_drive": drive_link if drive_link else ""
+            "link_drive": ""  # Puste, bo plik pobieramy ręcznie, a dane idą do Archiwum przez Firebase
         }
         
         try:
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.write("---")
-            st.success("📦 Przyjęcie zakończone sukcesem! Dokumenty są gotowe w panelu ARCHIWUM.")
+            st.success("📦 Przyjęcie zapisane pomyślnie w bazie i wysłane do panelu ARCHIWUM!")
         except:
             st.error("⚠️ Problem z połączeniem sieciowym przy zapisie do Firebase.")
+
+# Wyświetlanie przycisku pobierania, jeśli dokument został prawidłowo wygenerowany
+if "ostatni_pdf" in st.session_state:
+    st.write("---")
+    st.markdown("### 📥 DOKUMENT GOTOWY DO POBRANIA:")
+    st.download_button(
+        label="🟢 POBIERZ RAPORT PZ (PDF)",
+        data=st.session_state["ostatni_pdf"],
+        file_name=st.session_state["nazwa_ostatniego_pdf"],
+        mime="application/pdf"
+    )
