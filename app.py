@@ -29,8 +29,8 @@ FIREBASE_KONTRAHENCI_URL = f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci.json"
 FIREBASE_PRACOWNICY_URL = f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy.json"
 FIREBASE_ASORTYMENT_URL = f"{FIREBASE_BASE_URL}/janmar_wms_asortyment.json"
 
-# ID FOLDERU NA DYSKU GOOGLE (Gdzie mają lądować PZ-ki)
-GOOGLE_DRIVE_FOLDER_ID = "1F_G9nBwEuxn73xGzXj5x6g7S4e2V4_eZ"  # Upewnij się, że ten ID jest poprawny dla Twojego folderu
+# ID FOLDERU NA DYSKU GOOGLE (Wklejony Twój poprawny link)
+GOOGLE_DRIVE_FOLDER_ID = "1BTbdDxdI1Nvzz9Nmc0qm7BAAWAl3z8hS"
 
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
 
