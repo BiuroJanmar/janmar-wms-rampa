@@ -29,7 +29,7 @@ FIREBASE_KONTRAHENCI_URL = f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci.json"
 FIREBASE_PRACOWNICY_URL = f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy.json"
 FIREBASE_ASORTYMENT_URL = f"{FIREBASE_BASE_URL}/janmar_wms_asortyment.json"
 
-# ID FOLDERU NA DYSKU GOOGLE (Wklejony Twój poprawny link)
+# ID FOLDERU NA DYSKU GOOGLE (Twój zweryfikowany folder)
 GOOGLE_DRIVE_FOLDER_ID = "1BTbdDxdI1Nvzz9Nmc0qm7BAAWAl3z8hS"
 
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
@@ -37,10 +37,9 @@ st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="ce
 # --- POŁĄCZENIE Z GOOGLE DRIVE ---
 def pobierz_google_drive_service():
     try:
-        # Pobieranie klucza konta usługowego z zakładek Secrets w Streamlit
         info_klucza = json.loads(st.secrets["google_drive"]["service_account_info"])
         credentials = service_account.Credentials.from_service_account_info(
-            info_klucza, scopes=["https://www.googleapis.com/auth/drive.file"]
+            info_klucza, scopes=["https://www.googleapis.com/auth/drive"]
         )
         return build('drive', 'v3', credentials=credentials)
     except Exception as e:
@@ -54,17 +53,29 @@ def przeslij_pdf_na_google_drive(file_bytes, file_name):
     try:
         metadata_pliku = {
             'name': file_name,
-            'parents': [GOOGLE_DRIVE_FOLDER_ID] if GOOGLE_DRIVE_FOLDER_ID else []
+            'parents': [GOOGLE_DRIVE_FOLDER_ID] if GOOGLE_DRIVE_FOLDER_ID else [],
+            'mimeType': 'application/pdf'
         }
-        media = MediaIoBaseUpload(BytesIO(file_bytes), mimetype='application/pdf', resumable=True)
-        plik = service.files().create(body=metadata_pliku, media_body=media, fields='id, webViewLink').execute()
         
-        # Uprawnienia: Każdy kto ma link, może wyświetlić plik (potrzebne dla aplikacji Biuro i Archiwum)
-        service.permissions().create(
-            fileId=plik.get('id'),
-            body={'type': 'anyone', 'role': 'reader'}
+        # Poprawka: Zmiana resumable na False omija problem braku limitu miejsca (quota) dla konta usługowego
+        media = MediaIoBaseUpload(BytesIO(file_bytes), mimetype='application/pdf', resumable=False)
+        
+        plik = service.files().create(
+            body=metadata_pliku, 
+            media_body=media, 
+            fields='id, webViewLink',
+            supportsAllDrives=True
         ).execute()
         
+        try:
+            service.permissions().create(
+                fileId=plik.get('id'),
+                body={'type': 'anyone', 'role': 'reader'},
+                supportsAllDrives=True
+            ).execute()
+        except:
+            pass 
+            
         return plik.get('webViewLink')
     except Exception as e:
         st.error(f"❌ Nie udało się wysłać pliku na Dysk Google: {e}")
@@ -277,7 +288,7 @@ ilosc_palet_dostarczonych = 0
 if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     ilosc_szt_kg_laczna = st.number_input("Łączna ilość towaru (kg / szt):", min_value=0.0, value=0.0)
     ilosc_opakowan_laczna = st.number_input("Ilość przywiezionych skrzynek:", min_value=0, value=0)
-    ilosc_palet_dostarczonych = st.number_input("Ilość przywiezionych palet:", min_value=0, value=0)
+    ilosc_palet_dostarczonych = st.number_input("Ilość przywiezienych palet:", min_value=0, value=0)
     waga_netto_laczna = ilosc_szt_kg_laczna
 else:
     col1, col2, col3 = st.columns(3)
@@ -372,13 +383,11 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         img_array = np.array(canvas_result.image_data)
         podpis_pil = PILImage.fromarray(img_array.astype('uint8'), 'RGBA')
         
-        # ID i nazwa dokumentu
         id_losowe = str(random.randint(10000, 99999))
         rok_biezacy = datetime.today().strftime('%Y')
         losowy_nr_pz = f"PZ_{id_losowe}_{rok_biezacy}"
         dane_d_koncowe = baza_dostawcow[wybrany_id]
         
-        # GENEROWANIE TRANSMISYJNEGO KODU QR (LINK DO TELEFONU HANDLOWCA)
         link_dla_handlowca = f"https://janmar-wms-biuro-jgtio5bge3ogkstnnlpa9j.streamlit.app/?p={losowy_nr_pz}"
         
         qr = qrcode.QRCode(version=1, box_size=10, border=1)
@@ -390,7 +399,6 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         qr_img.save(qr_io, format='PNG')
         qr_io.seek(0)
         
-        # Tworzenie pliku PDF w pamięci urządzenia
         pdf_data = generuj_pdf_pz(
             losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
@@ -398,12 +406,10 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
         )
         
-        # 📂 WYSYŁKA RAPORTU PDF NA DYSK GOOGLE
         st.info("🔄 Zapisywanie nienaruszonego raportu PDF na Dysk Google Janmar...")
         nazwa_pliku_pdf = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
         drive_link = przeslij_pdf_na_google_drive(pdf_data, nazwa_pliku_pdf)
         
-        # PRZYGOTOWANIE REKORDU DO FIREBASE (Z LINKIEM DO DYSKU)
         payload = {
             "nr_pz": losowy_nr_pz.replace("_", "/"),
             "data": automatyczna_data,
@@ -421,7 +427,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             "status_jakosci": st.session_state["status_jakosci"],
             "uwagi": komentarz_jakosc,
             "magazynier": wybrany_magazynier,
-            "link_drive": drive_link if drive_link else ""  # Link odblokuje pobieranie w Archiwum
+            "link_drive": drive_link if drive_link else ""
         }
         
         try:
