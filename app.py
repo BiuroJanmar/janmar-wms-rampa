@@ -5,6 +5,8 @@ import requests
 import json
 from datetime import datetime
 from io import BytesIO
+from PIL import Image as PILImage
+import numpy as np
 from streamlit_drawable_canvas import st_canvas
 
 # Importy do generowania PDF
@@ -15,6 +17,11 @@ from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+# Importy do Google Drive API
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
 # KONFIGURACJA POŁĄCZENIA FIREBASE
 FIREBASE_BASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app"
 FIREBASE_URL = f"{FIREBASE_BASE_URL}/janmar_wms_rampa.json"
@@ -22,7 +29,46 @@ FIREBASE_KONTRAHENCI_URL = f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci.json"
 FIREBASE_PRACOWNICY_URL = f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy.json"
 FIREBASE_ASORTYMENT_URL = f"{FIREBASE_BASE_URL}/janmar_wms_asortyment.json"
 
+# ID FOLDERU NA DYSKU GOOGLE (Gdzie mają lądować PZ-ki)
+GOOGLE_DRIVE_FOLDER_ID = "1F_G9nBwEuxn73xGzXj5x6g7S4e2V4_eZ"  # Upewnij się, że ten ID jest poprawny dla Twojego folderu
+
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
+
+# --- POŁĄCZENIE Z GOOGLE DRIVE ---
+def pobierz_google_drive_service():
+    try:
+        # Pobieranie klucza konta usługowego z zakładek Secrets w Streamlit
+        info_klucza = json.loads(st.secrets["google_drive"]["service_account_info"])
+        credentials = service_account.Credentials.from_service_account_info(
+            info_klucza, scopes=["https://www.googleapis.com/auth/drive.file"]
+        )
+        return build('drive', 'v3', credentials=credentials)
+    except Exception as e:
+        st.error(f"❌ Błąd autoryzacji Google Drive: {e}")
+        return None
+
+def przeslij_pdf_na_google_drive(file_bytes, file_name):
+    service = pobierz_google_drive_service()
+    if not service:
+        return None
+    try:
+        metadata_pliku = {
+            'name': file_name,
+            'parents': [GOOGLE_DRIVE_FOLDER_ID] if GOOGLE_DRIVE_FOLDER_ID else []
+        }
+        media = MediaIoBaseUpload(BytesIO(file_bytes), mimetype='application/pdf', resumable=True)
+        plik = service.files().create(body=metadata_pliku, media_body=media, fields='id, webViewLink').execute()
+        
+        # Uprawnienia: Każdy kto ma link, może wyświetlić plik (potrzebne dla aplikacji Biuro i Archiwum)
+        service.permissions().create(
+            fileId=plik.get('id'),
+            body={'type': 'anyone', 'role': 'reader'}
+        ).execute()
+        
+        return plik.get('webViewLink')
+    except Exception as e:
+        st.error(f"❌ Nie udało się wysłać pliku na Dysk Google: {e}")
+        return None
 
 # --- ZABEZPIECZENIE HASŁEM ---
 if "autoryzowany" not in st.session_state:
@@ -52,8 +98,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.2 ☁️")
-st.subheader("Wersja ze sprostowaną oceną warunkową (Żółte światło)")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.4 ☁️")
+st.subheader("Wersja z automatyczną wysyłką PDF na Dysk Google")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -73,7 +119,6 @@ def pobierz_slownik_firebase(url, domyslny_slownik):
     except:
         return domyslny_slownik
 
-# Inicjalizacja słowników trwale połączonych z Firebase
 DOMYSLNI_DOSTAWCY = {
     "JAN-11199": {"nazwa": "MARCIN PRZEWORSKI", "tel": "601234567"},
     "JAN-10023": {"nazwa": "AGRO-HURT JANUSZ", "tel": "601234567"},
@@ -100,8 +145,8 @@ baza_asortymentu = pobierz_slownik_firebase(FIREBASE_ASORTYMENT_URL, DOMYSLNY_AS
 if "palety_tir" not in st.session_state:
     st.session_state["palety_tir"] = []
 
-# GENERATOR DOCUMENTS PDF
-def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, osoba_prow, podpis_img, qr_img_bytes):
+# GENERATOR DOKUMENTU PDF
+def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, java_pracownik, podpis_img, qr_img_bytes):
     try:
         pdfmetrics.registerFont(TTFont('PolishFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
         pdfmetrics.registerFont(TTFont('PolishFont-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
@@ -130,7 +175,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     dane_ogolne = [
         [Paragraph(f"<b>Nabywca / Magazyn:</b><br/>GPW JANMAR SP. Z O.O.<br/>ul. Gołaśka 3/58, Kraków", sub_style),
          Paragraph(f"<b>Dostawca:</b><br/>{dostawca_dane['nazwa']}<br/>ID: {dostawca_id}<br/>Tel: {dostawca_dane.get('tel', '-')}", sub_style)],
-        [Paragraph(f"<b>Data dostawy:</b> {data}<br/><b>Sporządził:</b> {osoba_prow}", sub_style),
+        [Paragraph(f"<b>Data dostawy:</b> {data}<br/><b>Sporządził:</b> {java_pracownik}", sub_style),
          Paragraph(f"<font color='{status_kolor}'><b>STATUS JAKOŚCI: {status}</b></font><br/>Uwagi: {uwagi}", sub_style)]
     ]
     t_ogolne = Table(dane_ogolne, colWidths=[270, 270])
@@ -157,7 +202,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     img_qr = Image(qr_img_bytes, width=70, height=70)
     
     tabela_podpisow = [
-        [Paragraph(f"<b>Podpis Magazyniera Janmar:</b><br/><br/>............................................<br/>{osoba_prow}", sub_style),
+        [Paragraph(f"<b>Podpis Magazyniera Janmar:</b><br/><br/>............................................<br/>{java_pracownik}", sub_style),
          Paragraph("<b>Podpis Dostawcy:</b>", sub_style), img_podpis,
          Paragraph("<b>KOD SYSTEMOWY BIURA:</b>", sub_style), img_qr]
     ]
@@ -315,6 +360,7 @@ if wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
             except:
                 st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
 
+# SFINALIZOWANIE PRZYJĘCIA
 if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
     if st.session_state["status_jakosci"] == "NIEWYBRANY":
         st.error("❌ Wybierz status jakości!")
@@ -323,8 +369,6 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
     elif canvas_result.image_data is None:
         st.error("❌ Brak podpisów kierowcy!")
     else:
-        from PIL import Image as PILImage
-        import numpy as np
         img_array = np.array(canvas_result.image_data)
         podpis_pil = PILImage.fromarray(img_array.astype('uint8'), 'RGBA')
         
@@ -334,7 +378,32 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         losowy_nr_pz = f"PZ_{id_losowe}_{rok_biezacy}"
         dane_d_koncowe = baza_dostawcow[wybrany_id]
         
-        # ZAPIS DANYCH DO FIREBASE
+        # GENEROWANIE TRANSMISYJNEGO KODU QR (LINK DO TELEFONU HANDLOWCA)
+        link_dla_handlowca = f"https://janmar-wms-biuro-jgtio5bge3ogkstnnlpa9j.streamlit.app/?p={losowy_nr_pz}"
+        
+        qr = qrcode.QRCode(version=1, box_size=10, border=1)
+        qr.add_data(link_dla_handlowca)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+        
+        qr_io = BytesIO()
+        qr_img.save(qr_io, format='PNG')
+        qr_io.seek(0)
+        
+        # Tworzenie pliku PDF w pamięci urządzenia
+        pdf_data = generuj_pdf_pz(
+            losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
+            f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
+            ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
+            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
+        )
+        
+        # 📂 WYSYŁKA RAPORTU PDF NA DYSK GOOGLE
+        st.info("🔄 Zapisywanie nienaruszonego raportu PDF na Dysk Google Janmar...")
+        nazwa_pliku_pdf = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
+        drive_link = przeslij_pdf_na_google_drive(pdf_data, nazwa_pliku_pdf)
+        
+        # PRZYGOTOWANIE REKORDU DO FIREBASE (Z LINKIEM DO DYSKU)
         payload = {
             "nr_pz": losowy_nr_pz.replace("_", "/"),
             "data": automatyczna_data,
@@ -351,44 +420,13 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             "netto": float(waga_netto_laczna),
             "status_jakosci": st.session_state["status_jakosci"],
             "uwagi": komentarz_jakosc,
-            "magazynier": wybrany_magazynier
+            "magazynier": wybrany_magazynier,
+            "link_drive": drive_link if drive_link else ""  # Link odblokuje pobieranie w Archiwum
         }
         
         try:
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.success("☁️ Dane przesłane do Firebase!")
+            st.write("---")
+            st.success("📦 Przyjęcie zakończone sukcesem! Dokumenty są gotowe w panelu ARCHIWUM.")
         except:
-            st.error("⚠️ Problem z siecią.")
-
-        # GENEROWANIE TRANSMISYJNEGO KODU QR (LINK DO TELEFONU HANDLOWCA)
-        link_dla_handlowca = f"https://janmar-wms-biuro-jgtio5bge3ogkstnnlpa9j.streamlit.app/?p={losowy_nr_pz}"
-        
-        qr = qrcode.QRCode(version=1, box_size=10, border=1)
-        qr.add_data(link_dla_handlowca)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white")
-        
-        qr_io = BytesIO()
-        qr_img.save(qr_io, format='PNG')
-        qr_io.seek(0)
-        
-        pdf_data = generuj_pdf_pz(
-            losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
-            f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
-            ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
-            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
-        )
-        
-        st.write("---")
-        st.markdown("### 🏷️ ETYKIETA NA PALETĘ (DLA HANDLOWCA)")
-        st.image(qr_io, width=250)
-        
-        st.download_button(
-            label="🖨️ POBIERZ SAM KOD QR (NA PALETĘ)",
-            data=qr_io.getvalue(),
-            file_name=f"KOD_QR_{losowy_nr_pz}.png",
-            mime="image/png"
-        )
-        
-        st.write("---")
-        st.download_button(label="📥 POBIERZ PEŁNY RAPORT PZ (PDF)", data=pdf_data, file_name=f"PZ_{losowy_nr_pz}.pdf", mime="application/pdf")
+            st.error("⚠️ Problem z połączeniem sieciowym przy zapisie do Firebase.")
