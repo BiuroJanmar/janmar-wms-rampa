@@ -54,14 +54,24 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.6 📸")
-st.subheader("Wersja z fotodokumentacją palet na wadze")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.7 📸")
+st.subheader("Wersja stabilna: Pamięć fotorejestru odporna na odświeżanie")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
     st.rerun()
 
 st.write("---")
+
+# INICJALIZACJA ZMIENNYCH SESJI DLA BEZPIECZNEGO PRZECHOWYWANIA DANYCH WAGI
+if "palety_tir" not in st.session_state:
+    st.session_state["palety_tir"] = []
+if "tmp_waga_brutto" not in st.session_state:
+    st.session_state["tmp_waga_brutto"] = 0.0
+if "tmp_ilosc_op" not in st.session_state:
+    st.session_state["tmp_ilosc_op"] = 0
+if "tmp_waga_jednego_op" not in st.session_state:
+    st.session_state["tmp_waga_jednego_op"] = 0.5
 
 # --- FUNKCJE POBIERANIA/ZAPISYWANIA SŁOWNIKÓW Z FIREBASE ---
 def pobierz_slownik_firebase(url, domyslny_slownik):
@@ -97,9 +107,6 @@ DOMYSLNY_ASORTYMENT = {
 baza_dostawcow = pobierz_slownik_firebase(FIREBASE_KONTRAHENCI_URL, DOMYSLNI_DOSTAWCY)
 baza_pracownikow = pobierz_slownik_firebase(FIREBASE_PRACOWNICY_URL, DOMYSLNI_PRACOWNICY)
 baza_asortymentu = pobierz_slownik_firebase(FIREBASE_ASORTYMENT_URL, DOMYSLNY_ASORTYMENT)
-
-if "palety_tir" not in st.session_state:
-    st.session_state["palety_tir"] = []
 
 # GENERATOR DOKUMENTU PDF Z DIAPOZYTYWAMI ZDJĘĆ
 def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, java_pracownik, podpis_img, qr_img_bytes, lista_palet):
@@ -170,7 +177,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     # 2. SEKCJA ZAŁĄCZNIKÓW FOTOGRAFICZNYCH (Tylko jeśli są zdjęcia)
     zdjecia_istnieja = any('foto_bytes' in p and p['foto_bytes'] is not None for p in lista_palet)
     if zdjecia_istnieja:
-        story.append(PageBreak())  # Zdjęcia wrzucamy od nowej strony, by zachować czystość dokumentu
+        story.append(PageBreak())  # Od nowej strony
         story.append(Paragraph("ZAŁĄCZNIK FOTOGRAFICZNY DO PROTOKOŁU PRZYJĘCIA", title_style))
         story.append(Spacer(1, 10))
         
@@ -180,7 +187,6 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
                 story.append(Paragraph(f"Specyfikacja: Skrzynek: <b>{paleta['opakowania']} szt.</b> | Wyliczona waga netto: <b>{paleta['netto']} kg</b>", sub_style))
                 story.append(Spacer(1, 5))
                 
-                # Dodanie zdjęcia (skalujemy szerokość do 380 punktów, wysokość proporcjonalnie)
                 io_foto = BytesIO(paleta['foto_bytes'])
                 img_reportlab = Image(io_foto, width=380, height=240)
                 img_reportlab.hAlign = 'CENTER'
@@ -257,48 +263,63 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     ilosc_palet_dostarczonych = st.number_input("Ilość przywiezienych palet:", min_value=0, value=0)
     waga_netto_laczna = ilosc_szt_kg_laczna
 else:
+    # Używamy Session State dla zachowania wartości niezależnie od aparatu
     col1, col2, col3 = st.columns(3)
-    with col1: waga_brutto_p = st.number_input("Waga BRUTTO palety (kg):", min_value=0.0, value=0.0)
-    with col2: ilosc_op_p = st.number_input("Ilość skrzynek na palecie (szt):", min_value=0, value=0)
-    with col3: waga_jednego_op = st.number_input("Waga skrzynki (tara - kg):", min_value=0.0, value=0.5, step=0.1)
+    with col1: 
+        waga_brutto_p = st.number_input("Waga BRUTTO palety (kg):", min_value=0.0, value=st.session_state["tmp_waga_brutto"])
+        st.session_state["tmp_waga_brutto"] = waga_brutto_p
+    with col2: 
+        ilosc_op_p = st.number_input("Ilość skrzynek na palecie (szt):", min_value=0, value=st.session_state["tmp_ilosc_op"])
+        st.session_state["tmp_ilosc_op"] = ilosc_op_p
+    with col3: 
+        waga_jednego_op = st.number_input("Waga skrzynki (tara - kg):", min_value=0.0, value=st.session_state["tmp_waga_jednego_op"], step=0.1)
+        st.session_state["tmp_waga_jednego_op"] = waga_jednego_op
     
     tara_palety_sztywna = 25.0 if rodzaj_palety == "PALETA EURO" else 15.0
     if rodzaj_palety == "LUZEM (BEZ PALET)": tara_palety_sztywna = 0.0
     tara_laczna_palety = tara_palety_sztywna + (ilosc_op_p * waga_jednego_op)
     netto_palety_wyliczone = max(0.0, waga_brutto_p - tara_laczna_palety)
     
-    st.warning(f"🧮 Wyliczone NETTO dla tej palety: **{netto_palety_wyliczone} kg**")
+    st.warning(f"🧮 Wyliczone NETTO dla obecnej palety: **{netto_palety_wyliczone} kg**")
     
-    # 📸 APARAT DLA MAGAZYNIERA (Aplikacja odpala obiektyw tabletu)
     st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
-    foto_capture = st.camera_input("Zrób zdjęcie palety stojącej na wadze brutto:", key="aparat_rampa")
+    foto_capture = st.camera_input("Zrób zdjęcie palety przed zatwierdzeniem rozładunku:", key="aparat_rampa")
     
     foto_bytes_zapis = None
     if foto_capture is not None:
         foto_bytes_zapis = foto_capture.getvalue()
-        st.success("✅ Zdjęcie palety zostało tymczasowo przechwycone!")
+        st.success("✅ Zdjęcie palety zostało zablokowane w pamięci!")
 
     if st.button("➕ ZATWIERDŹ I ZWAŻ NASTĘPNĄ PALETĘ"):
         if waga_brutto_p > 0 and ilosc_op_p > 0:
             st.session_state["palety_tir"].append({
                 "paleta_nr": len(st.session_state["palety_tir"]) + 1, 
-                "opakowania": ilosc_op_p, 
-                "netto": netto_palety_wyliczone,
-                "foto_bytes": foto_bytes_zapis  # Zdjęcie ląduje w pamięci sesji danej palety
+                "opakowania": int(ilosc_op_p), 
+                "netto": float(netto_palety_wyliczone),
+                "foto_bytes": foto_bytes_zapis  
             })
+            # Czyszczenie pamięci tymczasowej przed kolejną paletą
+            st.session_state["tmp_waga_brutto"] = 0.0
+            st.session_state["tmp_ilosc_op"] = 0
+            st.success(f"✔️ Zapisano Paletę nr {len(st.session_state['palety_tir'])}!")
+            st.preload = None
             st.rerun()
+        else:
+            st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
             
     if st.session_state["palety_tir"]:
         waga_netto_laczna = sum(p['netto'] for p in st.session_state["palety_tir"])
         ilosc_opakowan_laczna = sum(p['opakowania'] for p in st.session_state["palety_tir"])
         ilosc_palet_dostarczonych = len(st.session_state["palety_tir"])
         
-        # Liczymy ile palet ma zrobione zdjęcia
         zrobione_zdjecia = sum(1 for p in st.session_state["palety_tir"] if p.get('foto_bytes') is not None)
         
-        st.markdown(f"**RAZEM Z TIR-A:** Palet: `{ilosc_palet_dostarczonych}` | Skrzynek: `{ilosc_opakowan_laczna}` | NETTO: `{waga_netto_laczna} kg` | Zdjęcia: `{zrobione_zdjecia}/{ilosc_palet_dostarczonych}`")
-        if st.button("🗑️ RESETUJ PALETY"):
+        st.markdown(f"**📑 PODSUMOWANIE ROZŁADUNKU:**")
+        st.info(f"Palet: `{ilosc_palet_dostarczonych}` | Skrzynek razem: `{ilosc_opakowan_laczna} szt.` | NETTO: **{waga_netto_laczna} kg** | Fotografie: `{zrobione_zdjecia}/{ilosc_palet_dostarczonych}`")
+        if st.button("🗑️ RESETUJ I WYCZYŚĆ WAŻENIA"):
             st.session_state["palety_tir"] = []
+            st.session_state["tmp_waga_brutto"] = 0.0
+            st.session_state["tmp_ilosc_op"] = 0
             st.rerun()
 
 st.markdown("### 🔄 Saldo Wydawki")
@@ -364,6 +385,8 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         st.error("❌ Wybierz konkretnego pracownika!")
     elif canvas_result.image_data is None:
         st.error("❌ Brak podpisów kierowcy!")
+    elif tryb_przyjecia == "ROZŁADUNEK TIR (Ważenie paletowe)" and not st.session_state["palety_tir"]:
+        st.error("❌ Lista zważonych palet jest pusta! Dodaj przynajmniej jedną paletę za pomocą przycisku '+' przed zatwierdzeniem.")
     else:
         img_array = np.array(canvas_result.image_data)
         podpis_pil = PILImage.fromarray(img_array.astype('uint8'), 'RGBA')
@@ -384,22 +407,24 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         qr_img.save(qr_io, format='PNG')
         qr_io.seek(0)
         
-        # Pobieramy z systemu listę palet wraz ze zdjęciami, jeśli tryb to TIR, lub pustą listę jeśli Szybkie Przyjęcie
         aktualna_lista_palet = st.session_state["palety_tir"] if tryb_przyjecia == "ROZŁADUNEK TIR (Ważenie paletowe)" else []
         
-        # Wywołujemy generator PDF przekazując mu zgromadzone zdjęcia
+        # Jeśli to było Szybkie Przyjęcie, bierzemy dane z pól tradycyjnych
+        final_netto = waga_netto_laczna if tryb_przyjecia == "ROZŁADUNEK TIR (Ważenie paletowe)" else ilosc_szt_kg_laczna
+        final_opakowania = ilosc_opakowan_laczna
+        final_palety = ilosc_palet_dostarczonych
+        
         pdf_data = generuj_pdf_pz(
             losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
-            ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
-            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io,
+            final_opakowania, ilosc_opakowan_pobranych, final_palety, ilosc_palet_pobranych,
+            final_netto, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io,
             aktualna_lista_palet
         )
         
         st.session_state["ostatni_pdf"] = pdf_data
         st.session_state["nazwa_ostatniego_pdf"] = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
         
-        # Do bazy danych wysyłamy tylko tekst (wagi, sztuki, flagi), żeby nie obciążać chmury obrazami
         payload = {
             "nr_pz": losowy_nr_pz.replace("_", "/"),
             "data": automatyczna_data,
@@ -408,12 +433,12 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             "dostawca_tel": dane_d_koncowe.get('tel', '-'),
             "towar": wybrany_towar,
             "opakowanie_typ": f"{rodzaj_opakowania} - {szczegoly_opakowania}",
-            "opakowania_przywiezione": int(ilosc_opakowan_laczna),
+            "opakowania_przywiezione": int(final_opakowania),
             "opakowania_pobrane": int(ilosc_opakowan_pobranych),
             "palety_typ": rodzaj_palety,
-            "palety_przywiezione": int(ilosc_palet_dostarczonych),
+            "palety_przywiezione": int(final_palety),
             "palety_pobrane": int(ilosc_palet_pobranych),
-            "netto": float(waga_netto_laczna),
+            "netto": float(final_netto),
             "status_jakosci": st.session_state["status_jakosci"],
             "uwagi": komentarz_jakosc,
             "magazynier": wybrany_magazynier,
@@ -422,7 +447,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         
         try:
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.success("📦 Przyjęcie i kod QR zapisane w bazie! Raport ze zdjęciami palet wygenerowany pomyślnie.")
+            st.success("📦 Przyjęcie pomyślnie zarejestrowane. Raport ze zdjęciami jest gotowy poniżej!")
         except:
             st.error("⚠️ Problem z połączeniem sieciowym przy zapisie do Firebase.")
 
