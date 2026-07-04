@@ -9,9 +9,9 @@ from PIL import Image as PILImage
 import numpy as np
 from streamlit_drawable_canvas import st_canvas
 
-# Importy do generowania PDF
+# Importy do generowania PDF i obsługi obrazów/załączników
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
@@ -54,8 +54,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.5 📦")
-st.subheader("Wersja stabilna z bezpośrednim pobieraniem PDF")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.6 📸")
+st.subheader("Wersja z fotodokumentacją palet na wadze")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -101,8 +101,8 @@ baza_asortymentu = pobierz_slownik_firebase(FIREBASE_ASORTYMENT_URL, DOMYSLNY_AS
 if "palety_tir" not in st.session_state:
     st.session_state["palety_tir"] = []
 
-# GENERATOR DOKUMENTU PDF
-def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, java_pracownik, podpis_img, qr_img_bytes):
+# GENERATOR DOKUMENTU PDF Z DIAPOZYTYWAMI ZDJĘĆ
+def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, java_pracownik, podpis_img, qr_img_bytes, lista_palet):
     try:
         pdfmetrics.registerFont(TTFont('PolishFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
         pdfmetrics.registerFont(TTFont('PolishFont-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
@@ -118,10 +118,12 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     
     title_style = ParagraphStyle('TitleStyle', fontName=f_bold, fontSize=18, leading=22, textColor=colors.HexColor('#1F497D'), alignment=1)
     sub_style = ParagraphStyle('SubStyle', fontName=f_regular, fontSize=10, leading=14)
+    section_style = ParagraphStyle('SectionStyle', fontName=f_bold, fontSize=14, leading=18, textColor=colors.HexColor('#1F497D'), spaceBefore=15, spaceAfter=5)
     header_table_style = ParagraphStyle('HeaderTableStyle', fontName=f_bold, fontSize=9, leading=11, textColor=colors.white, alignment=1)
     cell_table_style = ParagraphStyle('CellTableStyle', fontName=f_regular, fontSize=9, leading=11, alignment=0)
     cell_table_center = ParagraphStyle('CellTableCenter', fontName=f_regular, fontSize=9, leading=11, alignment=1)
     
+    # 1. Strona główna - Nagłówek i tabele
     story.append(Paragraph(f"DOKUMENT PZ - PRZYJĘCIE ZEWNĘTRZNE nr: {nr_pz}", title_style))
     story.append(Spacer(1, 15))
     
@@ -147,7 +149,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     t_towarowa = Table(tabela_towarowa, colWidths=[250, 100, 95, 95])
     t_towarowa.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F497D')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#1F497D')), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#D9D9D9')), ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8)]))
     story.append(t_towarowa)
-    story.append(Spacer(1, 30))
+    story.append(Spacer(1, 25))
     
     podpis_kierowcy_io = BytesIO()
     podpis_img.save(podpis_kierowcy_io, format='PNG')
@@ -165,6 +167,26 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     t_podpisy.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM'), ('ALIGN', (4,0), (4,0), 'RIGHT')]))
     story.append(t_podpisy)
     
+    # 2. SEKCJA ZAŁĄCZNIKÓW FOTOGRAFICZNYCH (Tylko jeśli są zdjęcia)
+    zdjecia_istnieja = any('foto_bytes' in p and p['foto_bytes'] is not None for p in lista_palet)
+    if zdjecia_istnieja:
+        story.append(PageBreak())  # Zdjęcia wrzucamy od nowej strony, by zachować czystość dokumentu
+        story.append(Paragraph("ZAŁĄCZNIK FOTOGRAFICZNY DO PROTOKOŁU PRZYJĘCIA", title_style))
+        story.append(Spacer(1, 10))
+        
+        for paleta in lista_palet:
+            if 'foto_bytes' in paleta and paleta['foto_bytes'] is not None:
+                story.append(Paragraph(f"📸 Fotografia dowodowa: Paleta nr {paleta['paleta_nr']}", section_style))
+                story.append(Paragraph(f"Specyfikacja: Skrzynek: <b>{paleta['opakowania']} szt.</b> | Wyliczona waga netto: <b>{paleta['netto']} kg</b>", sub_style))
+                story.append(Spacer(1, 5))
+                
+                # Dodanie zdjęcia (skalujemy szerokość do 380 punktów, wysokość proporcjonalnie)
+                io_foto = BytesIO(paleta['foto_bytes'])
+                img_reportlab = Image(io_foto, width=380, height=240)
+                img_reportlab.hAlign = 'CENTER'
+                story.append(img_reportlab)
+                story.append(Spacer(1, 15))
+                
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
@@ -246,16 +268,35 @@ else:
     netto_palety_wyliczone = max(0.0, waga_brutto_p - tara_laczna_palety)
     
     st.warning(f"🧮 Wyliczone NETTO dla tej palety: **{netto_palety_wyliczone} kg**")
+    
+    # 📸 APARAT DLA MAGAZYNIERA (Aplikacja odpala obiektyw tabletu)
+    st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
+    foto_capture = st.camera_input("Zrób zdjęcie palety stojącej na wadze brutto:", key="aparat_rampa")
+    
+    foto_bytes_zapis = None
+    if foto_capture is not None:
+        foto_bytes_zapis = foto_capture.getvalue()
+        st.success("✅ Zdjęcie palety zostało tymczasowo przechwycone!")
+
     if st.button("➕ ZATWIERDŹ I ZWAŻ NASTĘPNĄ PALETĘ"):
         if waga_brutto_p > 0 and ilosc_op_p > 0:
-            st.session_state["palety_tir"].append({"paleta_nr": len(st.session_state["palety_tir"]) + 1, "opakowania": ilosc_op_p, "netto": netto_palety_wyliczone})
+            st.session_state["palety_tir"].append({
+                "paleta_nr": len(st.session_state["palety_tir"]) + 1, 
+                "opakowania": ilosc_op_p, 
+                "netto": netto_palety_wyliczone,
+                "foto_bytes": foto_bytes_zapis  # Zdjęcie ląduje w pamięci sesji danej palety
+            })
             st.rerun()
             
     if st.session_state["palety_tir"]:
         waga_netto_laczna = sum(p['netto'] for p in st.session_state["palety_tir"])
         ilosc_opakowan_laczna = sum(p['opakowania'] for p in st.session_state["palety_tir"])
         ilosc_palet_dostarczonych = len(st.session_state["palety_tir"])
-        st.markdown(f"**RAZEM Z TIR-A:** Palet: `{ilosc_palet_dostarczonych}` | Skrzynek: `{ilosc_opakowan_laczna}` | NETTO: `{waga_netto_laczna} kg`")
+        
+        # Liczymy ile palet ma zrobione zdjęcia
+        zrobione_zdjecia = sum(1 for p in st.session_state["palety_tir"] if p.get('foto_bytes') is not None)
+        
+        st.markdown(f"**RAZEM Z TIR-A:** Palet: `{ilosc_palet_dostarczonych}` | Skrzynek: `{ilosc_opakowan_laczna}` | NETTO: `{waga_netto_laczna} kg` | Zdjęcia: `{zrobione_zdjecia}/{ilosc_palet_dostarczonych}`")
         if st.button("🗑️ RESETUJ PALETY"):
             st.session_state["palety_tir"] = []
             st.rerun()
@@ -343,17 +384,22 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         qr_img.save(qr_io, format='PNG')
         qr_io.seek(0)
         
+        # Pobieramy z systemu listę palet wraz ze zdjęciami, jeśli tryb to TIR, lub pustą listę jeśli Szybkie Przyjęcie
+        aktualna_lista_palet = st.session_state["palety_tir"] if tryb_przyjecia == "ROZŁADUNEK TIR (Ważenie paletowe)" else []
+        
+        # Wywołujemy generator PDF przekazując mu zgromadzone zdjęcia
         pdf_data = generuj_pdf_pz(
             losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
             ilosc_opakowan_laczna, ilosc_opakowan_pobranych, ilosc_palet_dostarczonych, ilosc_palet_pobranych,
-            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io
+            waga_netto_laczna, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io,
+            aktualna_lista_palet
         )
         
-        # Zapisujemy wygenerowany dokument do pamięci sesji, aby był dostępny do pobrania
         st.session_state["ostatni_pdf"] = pdf_data
         st.session_state["nazwa_ostatniego_pdf"] = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
         
+        # Do bazy danych wysyłamy tylko tekst (wagi, sztuki, flagi), żeby nie obciążać chmury obrazami
         payload = {
             "nr_pz": losowy_nr_pz.replace("_", "/"),
             "data": automatyczna_data,
@@ -371,21 +417,20 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             "status_jakosci": st.session_state["status_jakosci"],
             "uwagi": komentarz_jakosc,
             "magazynier": wybrany_magazynier,
-            "link_drive": ""  # Puste, bo plik pobieramy ręcznie, a dane idą do Archiwum przez Firebase
+            "link_drive": ""  
         }
         
         try:
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.success("📦 Przyjęcie zapisane pomyślnie w bazie i wysłane do panelu ARCHIWUM!")
+            st.success("📦 Przyjęcie i kod QR zapisane w bazie! Raport ze zdjęciami palet wygenerowany pomyślnie.")
         except:
             st.error("⚠️ Problem z połączeniem sieciowym przy zapisie do Firebase.")
 
-# Wyświetlanie przycisku pobierania, jeśli dokument został prawidłowo wygenerowany
 if "ostatni_pdf" in st.session_state:
     st.write("---")
-    st.markdown("### 📥 DOKUMENT GOTOWY DO POBRANIA:")
+    st.markdown("### 📥 DOKUMENT GOTOWY (ZAWIERA ZDJĘCIA PALET):")
     st.download_button(
-        label="🟢 POBIERZ RAPORT PZ (PDF)",
+        label="📥 POBIERZ RAPORT PZ ZE ZDJĘCIAMI (PDF)",
         data=st.session_state["ostatni_pdf"],
         file_name=st.session_state["nazwa_ostatniego_pdf"],
         mime="application/pdf"
