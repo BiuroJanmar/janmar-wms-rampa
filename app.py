@@ -17,6 +17,11 @@ from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+# Importy do Google Drive API (Obsługa Dysku Współdzielonego Workspace)
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
 # KONFIGURACJA POŁĄCZENIA FIREBASE
 FIREBASE_BASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app"
 FIREBASE_URL = f"{FIREBASE_BASE_URL}/janmar_wms_rampa.json"
@@ -24,7 +29,57 @@ FIREBASE_KONTRAHENCI_URL = f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci.json"
 FIREBASE_PRACOWNICY_URL = f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy.json"
 FIREBASE_ASORTYMENT_URL = f"{FIREBASE_BASE_URL}/janmar_wms_asortyment.json"
 
+# ID NOWEGO DYSKU WSPÓŁDZIELONEGO GOOGLE WORKSPACE
+GOOGLE_DRIVE_FOLDER_ID = "0AEWw8Dk4oJiUUk9PVA"
+
 st.set_page_config(page_title="Janmar WMS - Rampa", page_icon="📦", layout="centered")
+
+# --- POŁĄCZENIE Z GOOGLE DRIVE ---
+def pobierz_google_drive_service():
+    try:
+        info_klucza = json.loads(st.secrets["google_drive"]["service_account_info"])
+        credentials = service_account.Credentials.from_service_account_info(
+            info_klucza, scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        return build('drive', 'v3', credentials=credentials)
+    except Exception as e:
+        st.error(f"❌ Błąd autoryzacji Google Drive: {e}")
+        return None
+
+def przeslij_pdf_na_google_drive(file_bytes, file_name):
+    service = pobierz_google_drive_service()
+    if not service:
+        return None
+    try:
+        metadata_pliku = {
+            'name': file_name,
+            'parents': [GOOGLE_DRIVE_FOLDER_ID] if GOOGLE_DRIVE_FOLDER_ID else [],
+            'mimeType': 'application/pdf'
+        }
+        
+        media = MediaIoBaseUpload(BytesIO(file_bytes), mimetype='application/pdf', resumable=False)
+        
+        # Włączenie pełnego wsparcia dla Dysków Współdzielonych Workspace
+        plik = service.files().create(
+            body=metadata_pliku, 
+            media_body=media, 
+            fields='id, webViewLink',
+            supportsAllDrives=True
+        ).execute()
+        
+        try:
+            service.permissions().create(
+                fileId=plik.get('id'),
+                body={'type': 'anyone', 'role': 'reader'},
+                supportsAllDrives=True
+            ).execute()
+        except:
+            pass 
+            
+        return plik.get('webViewLink')
+    except Exception as e:
+        st.error(f"❌ Nie udało się wysłać pliku na Dysk Google: {e}")
+        return None
 
 # --- ZABEZPIECZENIE HASŁEM ---
 if "autoryzowany" not in st.session_state:
@@ -43,10 +98,9 @@ if not st.session_state["autoryzowany"]:
             st.error("❌ Błędne hasło!")
     st.stop()
 
-# --- CSS STYLIZACJA (W tym pancerne ukrywanie menu i dolnego paska systemowego) ---
+# --- CSS STYLIZACJA (Bezpieczny interfejs bez pasków Streamlita) ---
 st.markdown("""
     <style>
-    /* Blokada i całkowite ukrycie dolnego paska Streamlit Cloud Toolbar, menu i stopek */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -54,8 +108,6 @@ st.markdown("""
     [data-testid="stStatusWidget"] {display: none;}
     .viewerBadge_container__1QSob {display: none !important;}
     iframe[title="streamlitApp"] {margin-bottom: -50px !important;}
-    
-    /* Ukrywanie specyficznych dla Streamlit linków i przycisków deweloperskich na dole ekranu */
     div[class^="viewerBadge"] {display: none !important;}
     div[data-testid="stToolbar"] {visibility: hidden; display: none !important;}
     
@@ -67,8 +119,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.9 📸")
-st.subheader("Wersja zabezpieczona z ukrytym menu systemowym")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v3.0 📸")
+st.subheader("System spięty z Google Workspace i fotorejestrem")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -76,14 +128,14 @@ if st.button("🔒 WYLOGUJ Z PANELU"):
 
 st.write("---")
 
-# INICJALIZACJA SYSTEMU SYSTEMU STATE DLA APARATÓW I BLOKAD DANYCH
+# INICJALIZACJA ZMIENNYCH SESJI DLA APARATÓW I BEZPIECZNEGO ZAPISU DANYCH
 if "palety_tir" not in st.session_state: st.session_state["palety_tir"] = []
 if "tmp_waga_brutto" not in st.session_state: st.session_state["tmp_waga_brutto"] = 0.0
 if "tmp_ilosc_op" not in st.session_state: st.session_state["tmp_ilosc_op"] = 0
 if "tmp_waga_jednego_op" not in st.session_state: st.session_state["tmp_waga_jednego_op"] = 0.5
 if "foto_busy_bytes" not in st.session_state: st.session_state["foto_busy_bytes"] = None
 
-# Liczniki kluczy (zmuszają tablet do twardego restartu obiektywu)
+# Liczniki kluczy dla twardego resetu aparatów i podpisu
 if "cam_tir_counter" not in st.session_state: st.session_state["cam_tir_counter"] = 0
 if "cam_busy_counter" not in st.session_state: st.session_state["cam_busy_counter"] = 0
 if "canvas_key_counter" not in st.session_state: st.session_state["canvas_key_counter"] = 0
@@ -136,7 +188,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     story.append(Paragraph(f"DOKUMENT PZ - PRZYJĘCIE ZEWNĘTRZNE nr: {nr_pz}", title_style))
     story.append(Spacer(1, 15))
     
-    status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCZOWY' else '#e74c3c')
+    status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCWY' else '#e74c3c')
     
     dane_ogolne = [
         [Paragraph(f"<b>Nabywca / Magazyn:</b><br/>GPW JANMAR SP. Z O.O.<br/>ul. Gołaśka 3/58, Kraków", sub_style),
@@ -176,7 +228,6 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     t_podpisy.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM'), ('ALIGN', (4,0), (4,0), 'RIGHT')]))
     story.append(t_podpisy)
     
-    # 2. SEKCJA FOTOGRAFICZNA
     ma_foto_tir = any('foto_bytes' in p and p['foto_bytes'] is not None for p in lista_palet)
     ma_foto_busy = foto_busy is not None
     
@@ -239,7 +290,7 @@ wybrany_towar = st.selectbox("Wybierz rodzaj towaru:", options=opcje_asortymentu
 
 nowy_towar_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO ASORTYMENTU ]")
 if nowy_towar_chk:
-    dodaj_towar_nazwa = st.text_input("Wpisz nową nazwę towaru:")
+    dodaj_towar_nazwa = st.text_input("Wpisz new nazwę towaru:")
     if st.button("💾 ZAPISZ ASORTYMENT TRWALE W CHMURZE"):
         if dodaj_towar_nazwa:
             nowy_t_id = f"A-{random.randint(100, 999)}"
@@ -273,7 +324,7 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     
     st.markdown("#### 📸 Załącznik: Zdjęcie ładunku / busa")
     key_busy_cam = f"cam_busy_node_{st.session_state['cam_busy_counter']}"
-    foto_busy_capture = st.camera_input("Zrób zdjęcie poglądowe towaru:", key=key_busy_cam)
+    foto_busy_capture = st.camera_input("Zrób zdjęcie poglądowe towaru w busie:", key=key_busy_cam)
     if foto_busy_capture is not None:
         st.session_state["foto_busy_bytes"] = foto_busy_capture.getvalue()
         st.success("✅ Zdjęcie ładunku dodane do protokołu małego przyjęcia!")
@@ -315,7 +366,7 @@ else:
             })
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
-            st.session_state["cam_tir_counter"] += 1  
+            st.session_state["cam_tir_counter"] += 1  # 🔄 AUTO-RESTART OBIEKTYWU APARATU
             st.success(f"✔️ Zapisano Paletę nr {len(st.session_state['palety_tir'])}!")
             st.rerun()
         else: st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
@@ -327,7 +378,7 @@ else:
         
         zrobione_zdjecia = sum(1 for p in st.session_state["palety_tir"] if p.get('foto_bytes') is not None)
         
-        st.markdown(f"**### PODSUMOWANIE ROZŁADUNKU:**")
+        st.markdown(f"### PODSUMOWANIE ROZŁADUNKU:")
         st.info(f"Palet: `{ilosc_palet_dostarczonych}` | Skrzynek razem: `{ilosc_opakowan_laczna} szt.` | NETTO: **{waga_netto_laczna} kg** | Fotografie: `{zrobione_zdjecia}/{ilosc_palet_dostarczonych}`")
         if st.button("🗑️ RESETUJ I WYCZYŚĆ WAŻENIA"):
             st.session_state["palety_tir"] = []
@@ -426,6 +477,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         final_opakowania = ilosc_opakowan_laczna
         final_palety = ilosc_palet_dostarczonych
         
+        # 1. Generowanie pliku PDF
         pdf_data = generuj_pdf_pz(
             losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
@@ -433,6 +485,11 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             final_netto, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io,
             aktualna_lista_palet, final_foto_busy
         )
+        
+        # 2. 📂 AUTOMATYCZNA TRANSMISJA CHMUROWA NA DYSK WSPÓŁDZIELONY WORKSPACE
+        st.info("🔄 Zapisywanie nienaruszonego raportu PDF na firmowy Dysk Workspace Janmar...")
+        nazwa_pliku_pdf = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
+        drive_link = przeslij_pdf_na_google_drive(pdf_data, nazwa_pliku_pdf)
         
         st.session_state["ostatni_pdf"] = pdf_data
         st.session_state["nazwa_ostatniego_pdf"] = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
@@ -454,14 +511,14 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             "status_jakosci": st.session_state["status_jakosci"],
             "uwagi": komentarz_jakosc,
             "magazynier": wybrany_magazynier,
-            "link_drive": ""  
+            "link_drive": drive_link if drive_link else ""  # Link odblokuje przyciski w panelu Archiwum
         }
         
         try:
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.toast("🔥 Zapisano pomyślnie w Firebase!")
+            st.toast("🔥 Zapisano pomyślnie w chmurze Firebase!")
             
-            # 🧼 CZYSZCZENIE EKRANU
+            # 🧼 TOTALNE CZYSZCZENIE EKRANU (Zabezpieczenie przed dublami)
             st.session_state["palety_tir"] = []
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
@@ -471,13 +528,13 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             st.session_state["cam_busy_counter"] += 1
             st.session_state["canvas_key_counter"] += 1  
             
-            st.success("📦 Przyjęcie zarejestrowane! Dane wyczyszczone. Pobierz gotowy dokument PDF poniżej.")
+            st.success("📦 Przyjęcie zarejestrowane! Dokument wysłany na Dysk Google. Formularz wyczyszczony.")
             st.rerun()
         except: st.error("⚠️ Problem z połączeniem sieciowym przy zapisie do Firebase.")
 
 if "ostatni_pdf" in st.session_state:
     st.write("---")
-    st.markdown("### 📥 DOKUMENT GOTOWY DO POBRANIA:")
+    st.markdown("### 📥 DOKUMENT ZAPISANY NA DYSKU GOOGLE (Kopia awaryjna do pobrania):")
     st.download_button(
         label="📥 POBIERZ OSTATNI RAPORT PZ (PDF)",
         data=st.session_state["ostatni_pdf"],
