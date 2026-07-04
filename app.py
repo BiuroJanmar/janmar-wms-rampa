@@ -54,8 +54,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.7 📸")
-st.subheader("Wersja stabilna: Pamięć fotorejestru odporna na odświeżanie")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.8 📸")
+st.subheader("Wersja z autofleszem kamery i zabezpieczeniem przed dublowaniem PZ")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -63,27 +63,27 @@ if st.button("🔒 WYLOGUJ Z PANELU"):
 
 st.write("---")
 
-# INICJALIZACJA ZMIENNYCH SESJI DLA BEZPIECZNEGO PRZECHOWYWANIA DANYCH WAGI
-if "palety_tir" not in st.session_state:
-    st.session_state["palety_tir"] = []
-if "tmp_waga_brutto" not in st.session_state:
-    st.session_state["tmp_waga_brutto"] = 0.0
-if "tmp_ilosc_op" not in st.session_state:
-    st.session_state["tmp_ilosc_op"] = 0
-if "tmp_waga_jednego_op" not in st.session_state:
-    st.session_state["tmp_waga_jednego_op"] = 0.5
+# INICJALIZACJA SYSTEMU SYSTEMU STATE DLA APARATÓW I BLOKAD DANYCH
+if "palety_tir" not in st.session_state: st.session_state["palety_tir"] = []
+if "tmp_waga_brutto" not in st.session_state: st.session_state["tmp_waga_brutto"] = 0.0
+if "tmp_ilosc_op" not in st.session_state: st.session_state["tmp_ilosc_op"] = 0
+if "tmp_waga_jednego_op" not in st.session_state: st.session_state["tmp_waga_jednego_op"] = 0.5
+if "foto_busy_bytes" not in st.session_state: st.session_state["foto_busy_bytes"] = None
+
+# Liczniki kluczy (zmuszają tablet do twardego restartu obiektywu)
+if "cam_tir_counter" not in st.session_state: st.session_state["cam_tir_counter"] = 0
+if "cam_busy_counter" not in st.session_state: st.session_state["cam_busy_counter"] = 0
+if "canvas_key_counter" not in st.session_state: st.session_state["canvas_key_counter"] = 0
 
 # --- FUNKCJE POBIERANIA/ZAPISYWANIA SŁOWNIKÓW Z FIREBASE ---
 def pobierz_slownik_firebase(url, domyslny_slownik):
     try:
         res = requests.get(url)
-        if res.status_code == 200 and res.json():
-            return res.json()
+        if res.status_code == 200 and res.json(): return res.json()
         else:
             requests.put(url, data=json.dumps(domyslny_slownik))
             return domyslny_slownik
-    except:
-        return domyslny_slownik
+    except: return domyslny_slownik
 
 DOMYSLNI_DOSTAWCY = {
     "JAN-11199": {"nazwa": "MARCIN PRZEWORSKI", "tel": "601234567"},
@@ -91,17 +91,10 @@ DOMYSLNI_DOSTAWCY = {
     "JAN-10452": {"nazwa": "POL-FRUT SP. Z O.O.", "tel": "509876543"}
 }
 DOMYSLNI_PRACOWNICY = {
-    "M-01": "Zbigniew Tkaczyk",
-    "M-02": "Jan Kowalski",
-    "M-03": "Mariusz Nowak",
-    "M-04": "Piotr Zieliński"
+    "M-01": "Zbigniew Tkaczyk", "M-02": "Jan Kowalski", "M-03": "Mariusz Nowak", "M-04": "Piotr Zieliński"
 }
 DOMYSLNY_ASORTYMENT = {
-    "A-01": "ARBUZ LUZ",
-    "A-02": "ZIEMNIAK WCZESNY LUZ",
-    "A-03": "ZIEMNIAK LUZ",
-    "A-04": "KAPUSTA PEKIŃSKA LUZ",
-    "A-05": "KAPUSTA WŁOSKA LUZ"
+    "A-01": "ARBUZ LUZ", "A-02": "ZIEMNIAK WCZESNY LUZ", "A-03": "ZIEMNIAK LUZ", "A-04": "KAPUSTA PEKIŃSKA LUZ", "A-05": "KAPUSTA WŁOSKA LUZ"
 }
 
 baza_dostawcow = pobierz_slownik_firebase(FIREBASE_KONTRAHENCI_URL, DOMYSLNI_DOSTAWCY)
@@ -109,15 +102,12 @@ baza_pracownikow = pobierz_slownik_firebase(FIREBASE_PRACOWNICY_URL, DOMYSLNI_PR
 baza_asortymentu = pobierz_slownik_firebase(FIREBASE_ASORTYMENT_URL, DOMYSLNY_ASORTYMENT)
 
 # GENERATOR DOKUMENTU PDF Z DIAPOZYTYWAMI ZDJĘĆ
-def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, java_pracownik, podpis_img, qr_img_bytes, lista_palet):
+def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_str, paleta_str, przywiezione_op, pobrane_op, przywiezione_pal, pobrane_pal, netto, status, uwagi, java_pracownik, podpis_img, qr_img_bytes, lista_palet, foto_busy):
     try:
         pdfmetrics.registerFont(TTFont('PolishFont', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
         pdfmetrics.registerFont(TTFont('PolishFont-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
-        f_regular = 'PolishFont'
-        f_bold = 'PolishFont-Bold'
-    except:
-        f_regular = 'Helvetica'
-        f_bold = 'Helvetica-Bold'
+        f_regular, f_bold = 'PolishFont', 'PolishFont-Bold'
+    except: f_regular, f_bold = 'Helvetica', 'Helvetica-Bold'
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottom=30)
@@ -125,12 +115,11 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     
     title_style = ParagraphStyle('TitleStyle', fontName=f_bold, fontSize=18, leading=22, textColor=colors.HexColor('#1F497D'), alignment=1)
     sub_style = ParagraphStyle('SubStyle', fontName=f_regular, fontSize=10, leading=14)
-    section_style = ParagraphStyle('SectionStyle', fontName=f_bold, fontSize=14, leading=18, textColor=colors.HexColor('#1F497D'), spaceBefore=15, spaceAfter=5)
+    section_style = ParagraphStyle('SectionStyle', fontName=f_bold, fontSize=13, leading=16, textColor=colors.HexColor('#1F497D'), spaceBefore=12, spaceAfter=4)
     header_table_style = ParagraphStyle('HeaderTableStyle', fontName=f_bold, fontSize=9, leading=11, textColor=colors.white, alignment=1)
     cell_table_style = ParagraphStyle('CellTableStyle', fontName=f_regular, fontSize=9, leading=11, alignment=0)
     cell_table_center = ParagraphStyle('CellTableCenter', fontName=f_regular, fontSize=9, leading=11, alignment=1)
     
-    # 1. Strona główna - Nagłówek i tabele
     story.append(Paragraph(f"DOKUMENT PZ - PRZYJĘCIE ZEWNĘTRZNE nr: {nr_pz}", title_style))
     story.append(Spacer(1, 15))
     
@@ -174,24 +163,33 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     t_podpisy.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM'), ('ALIGN', (4,0), (4,0), 'RIGHT')]))
     story.append(t_podpisy)
     
-    # 2. SEKCJA ZAŁĄCZNIKÓW FOTOGRAFICZNYCH (Tylko jeśli są zdjęcia)
-    zdjecia_istnieja = any('foto_bytes' in p and p['foto_bytes'] is not None for p in lista_palet)
-    if zdjecia_istnieja:
-        story.append(PageBreak())  # Od nowej strony
+    # 2. SEKCJA FOTOGRAFICZNA
+    ma_foto_tir = any('foto_bytes' in p and p['foto_bytes'] is not None for p in lista_palet)
+    ma_foto_busy = foto_busy is not None
+    
+    if ma_foto_tir or ma_foto_busy:
+        story.append(PageBreak())
         story.append(Paragraph("ZAŁĄCZNIK FOTOGRAFICZNY DO PROTOKOŁU PRZYJĘCIA", title_style))
         story.append(Spacer(1, 10))
         
-        for paleta in lista_palet:
-            if 'foto_bytes' in paleta and paleta['foto_bytes'] is not None:
-                story.append(Paragraph(f"📸 Fotografia dowodowa: Paleta nr {paleta['paleta_nr']}", section_style))
-                story.append(Paragraph(f"Specyfikacja: Skrzynek: <b>{paleta['opakowania']} szt.</b> | Wyliczona waga netto: <b>{paleta['netto']} kg</b>", sub_style))
-                story.append(Spacer(1, 5))
-                
-                io_foto = BytesIO(paleta['foto_bytes'])
-                img_reportlab = Image(io_foto, width=380, height=240)
-                img_reportlab.hAlign = 'CENTER'
-                story.append(img_reportlab)
-                story.append(Spacer(1, 15))
+        if ma_foto_busy:
+            story.append(Paragraph("📸 Dokumentacja fotograficzna dostawy (Szybkie przyjęcie / Bus):", section_style))
+            io_fb = BytesIO(foto_busy)
+            img_fb = Image(io_fb, width=400, height=260)
+            img_fb.hAlign = 'CENTER'
+            story.append(img_fb)
+            
+        if ma_foto_tir:
+            for paleta in lista_palet:
+                if 'foto_bytes' in paleta and paleta['foto_bytes'] is not None:
+                    story.append(Paragraph(f"📸 Fotografia dowodowa: Paleta nr {paleta['paleta_nr']}", section_style))
+                    story.append(Paragraph(f"Skrzynek: <b>{paleta['opakowania']} szt.</b> | Waga netto: <b>{paleta['netto']} kg</b>", sub_style))
+                    story.append(Spacer(1, 4))
+                    io_foto = BytesIO(paleta['foto_bytes'])
+                    img_reportlab = Image(io_foto, width=380, height=240)
+                    img_reportlab.hAlign = 'CENTER'
+                    story.append(img_reportlab)
+                    story.append(Spacer(1, 10))
                 
     doc.build(story)
     buffer.seek(0)
@@ -216,10 +214,8 @@ if nowy_dostawca_chk:
                 requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_kontrahenci/{wylosowane_id}.json", data=json.dumps({"nazwa": nowa_nazwa.upper(), "tel": nowy_tel}))
                 st.success(f"✅ Dostawca {nowa_nazwa.upper()} został zapisany w bazie Firebase!")
                 st.rerun()
-            except:
-                st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
-        else:
-            st.error("❌ Podaj poprawną nazwę oraz 9-cyfrowy numer telefonu!")
+            except: st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
+        else: st.error("❌ Podaj poprawną nazwę oraz 9-cyfrowy numer telefonu!")
 
 st.write("---")
 
@@ -238,8 +234,7 @@ if nowy_towar_chk:
                 requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_asortyment/{nowy_t_id}.json", data=json.dumps(dodaj_towar_nazwa.upper().strip()))
                 st.success(f"✅ Towar {dodaj_towar_nazwa.upper().strip()} dopisany trwale do Firebase!")
                 st.rerun()
-            except:
-                st.error("❌ Błąd sieci! Nie udało się zapisać towaru w Firebase.")
+            except: st.error("❌ Błąd sieci! Nie udało się zapisać towaru w Firebase.")
 
 rodzaj_opakowania = st.radio("Rodzaj packagingu towaru:", ["OPAKOWANIE JEDNORAZOWE", "OPAKOWANIE WYMIENNE"])
 szczegoly_opakowania = "Luz/Brak"
@@ -262,8 +257,15 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     ilosc_opakowan_laczna = st.number_input("Ilość przywiezionych skrzynek:", min_value=0, value=0)
     ilosc_palet_dostarczonych = st.number_input("Ilość przywiezienych palet:", min_value=0, value=0)
     waga_netto_laczna = ilosc_szt_kg_laczna
+    
+    # 📸 FOTO DLA SZYBKIEGO PRZYJĘCIA (Wersja z inkrementacją klucza dla autorestartu)
+    st.markdown("#### 📸 Załącznik: Zdjęcie ładunku / busa")
+    key_busy_cam = f"cam_busy_node_{st.session_state['cam_busy_counter']}"
+    foto_busy_capture = st.camera_input("Zrób zdjęcie poglądowe towaru:", key=key_busy_cam)
+    if foto_busy_capture is not None:
+        st.session_state["foto_busy_bytes"] = foto_busy_capture.getvalue()
+        st.success("✅ Zdjęcie ładunku dodane do protokołu małego przyjęcia!")
 else:
-    # Używamy Session State dla zachowania wartości niezależnie od aparatu
     col1, col2, col3 = st.columns(3)
     with col1: 
         waga_brutto_p = st.number_input("Waga BRUTTO palety (kg):", min_value=0.0, value=st.session_state["tmp_waga_brutto"])
@@ -282,8 +284,10 @@ else:
     
     st.warning(f"🧮 Wyliczone NETTO dla obecnej palety: **{netto_palety_wyliczone} kg**")
     
+    # 📸 APARAT DLA TIR (Dynamiczny klucz resetujący aparat)
     st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
-    foto_capture = st.camera_input("Zrób zdjęcie palety przed zatwierdzeniem rozładunku:", key="aparat_rampa")
+    key_tir_cam = f"cam_tir_node_{st.session_state['cam_tir_counter']}"
+    foto_capture = st.camera_input("Zrób zdjęcie palety przed kliknięciem plusa (+):", key=key_tir_cam)
     
     foto_bytes_zapis = None
     if foto_capture is not None:
@@ -298,14 +302,13 @@ else:
                 "netto": float(netto_palety_wyliczone),
                 "foto_bytes": foto_bytes_zapis  
             })
-            # Czyszczenie pamięci tymczasowej przed kolejną paletą
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
+            st.session_state["cam_tir_counter"] += 1  # 🔄 AUTO-RESTART OBIEKTYWU APARATU
             st.success(f"✔️ Zapisano Paletę nr {len(st.session_state['palety_tir'])}!")
-            st.preload = None
+            st. those_are_fine = None
             st.rerun()
-        else:
-            st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
+        else: st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
             
     if st.session_state["palety_tir"]:
         waga_netto_laczna = sum(p['netto'] for p in st.session_state["palety_tir"])
@@ -320,6 +323,7 @@ else:
             st.session_state["palety_tir"] = []
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
+            st.session_state["cam_tir_counter"] += 1
             st.rerun()
 
 st.markdown("### 🔄 Saldo Wydawki")
@@ -360,7 +364,9 @@ st.write("---")
 # KROK 5: PODPIS DOSTAWCY
 st.header("5. Podpis Dostawcy i Autoryzacja")
 st.markdown("✍️ ... Podpisz się palcem w ramce:")
-canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key="canvas")
+
+canvas_key = f"signature_canvas_{st.session_state['canvas_key_counter']}"
+canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key=canvas_key)
 
 opcje_magazynierów = list(baza_pracownikow.values())
 wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=opcje_magazynierów + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
@@ -374,17 +380,13 @@ if wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
                 requests.put(f"{FIREBASE_BASE_URL}/janmar_wms_pracownicy/{nowe_m_id}.json", data=json.dumps(nowy_m_imie.strip()))
                 st.success(f"✅ Pracownik {nowy_m_imie.strip()} dopisany trwale do Firebase!")
                 st.rerun()
-            except:
-                st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
+            except: st.error("❌ Błąd sieci! Nie udało się zapisać w Firebase.")
 
 # SFINALIZOWANIE PRZYJĘCIA
 if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
-    if st.session_state["status_jakosci"] == "NIEWYBRANY":
-        st.error("❌ Wybierz status jakości!")
-    elif wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY":
-        st.error("❌ Wybierz konkretnego pracownika!")
-    elif canvas_result.image_data is None:
-        st.error("❌ Brak podpisów kierowcy!")
+    if st.session_state["status_jakosci"] == "NIEWYBRANY": st.error("❌ Wybierz status jakości!")
+    elif wybrany_magazynier == "➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY": st.error("❌ Wybierz konkretnego pracownika!")
+    elif canvas_result.image_data is None: st.error("❌ Brak podpisów kierowcy!")
     elif tryb_przyjecia == "ROZŁADUNEK TIR (Ważenie paletowe)" and not st.session_state["palety_tir"]:
         st.error("❌ Lista zważonych palet jest pusta! Dodaj przynajmniej jedną paletę za pomocą przycisku '+' przed zatwierdzeniem.")
     else:
@@ -408,8 +410,8 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         qr_io.seek(0)
         
         aktualna_lista_palet = st.session_state["palety_tir"] if tryb_przyjecia == "ROZŁADUNEK TIR (Ważenie paletowe)" else []
+        final_foto_busy = st.session_state["foto_busy_bytes"] if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)" else None
         
-        # Jeśli to było Szybkie Przyjęcie, bierzemy dane z pól tradycyjnych
         final_netto = waga_netto_laczna if tryb_przyjecia == "ROZŁADUNEK TIR (Ważenie paletowe)" else ilosc_szt_kg_laczna
         final_opakowania = ilosc_opakowan_laczna
         final_palety = ilosc_palet_dostarczonych
@@ -419,7 +421,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
             final_opakowania, ilosc_opakowan_pobranych, final_palety, ilosc_palet_pobranych,
             final_netto, st.session_state["status_jakosci"], komentarz_jakosc, wybrany_magazynier, podpis_pil, qr_io,
-            aktualna_lista_palet
+            aktualna_lista_palet, final_foto_busy
         )
         
         st.session_state["ostatni_pdf"] = pdf_data
@@ -447,15 +449,27 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         
         try:
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
-            st.success("📦 Przyjęcie pomyślnie zarejestrowane. Raport ze zdjęciami jest gotowy poniżej!")
-        except:
-            st.error("⚠️ Problem z połączeniem sieciowym przy zapisie do Firebase.")
+            st.toast("🔥 Zapisano pomyślnie w Firebase!")
+            
+            # 🧼 PANCERNE CZYSZCZENIE EKRANU PRZED DUBLAMI
+            st.session_state["palety_tir"] = []
+            st.session_state["tmp_waga_brutto"] = 0.0
+            st.session_state["tmp_ilosc_op"] = 0
+            st.session_state["foto_busy_bytes"] = None
+            st.session_state["status_jakosci"] = "NIEWYBRANY"
+            st.session_state["cam_tir_counter"] += 1
+            st.session_state["cam_busy_counter"] += 1
+            st.session_state["canvas_key_counter"] += 1  # Czyści podpis cyfrowy na ekranie
+            
+            st.success("📦 Przyjęcie zarejestrowane! Dane wyczyszczone. Pobierz gotowy dokument PDF poniżej.")
+            st.rerun()
+        except: st.error("⚠️ Problem z połączeniem sieciowym przy zapisie do Firebase.")
 
 if "ostatni_pdf" in st.session_state:
     st.write("---")
-    st.markdown("### 📥 DOKUMENT GOTOWY (ZAWIERA ZDJĘCIA PALET):")
+    st.markdown("### 📥 DOKUMENT GOTOWY DO POBRANIA:")
     st.download_button(
-        label="📥 POBIERZ RAPORT PZ ZE ZDJĘCIAMI (PDF)",
+        label="📥 POBIERZ OSTATNI RAPORT PZ (PDF)",
         data=st.session_state["ostatni_pdf"],
         file_name=st.session_state["nazwa_ostatniego_pdf"],
         mime="application/pdf"
