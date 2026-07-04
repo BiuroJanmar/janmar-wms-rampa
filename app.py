@@ -43,9 +43,22 @@ if not st.session_state["autoryzowany"]:
             st.error("❌ Błędne hasło!")
     st.stop()
 
-# --- CSS STYLIZACJA ---
+# --- CSS STYLIZACJA (W tym pancerne ukrywanie menu i dolnego paska systemowego) ---
 st.markdown("""
     <style>
+    /* Blokada i całkowite ukrycie dolnego paska Streamlit Cloud Toolbar, menu i stopek */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    [data-testid="stDecoration"] {display: none;}
+    [data-testid="stStatusWidget"] {display: none;}
+    .viewerBadge_container__1QSob {display: none !important;}
+    iframe[title="streamlitApp"] {margin-bottom: -50px !important;}
+    
+    /* Ukrywanie specyficznych dla Streamlit linków i przycisków deweloperskich na dole ekranu */
+    div[class^="viewerBadge"] {display: none !important;}
+    div[data-testid="stToolbar"] {visibility: hidden; display: none !important;}
+    
     html, body, [data-testid="stWidgetLabel"] p { font-size: 20px !important; font-weight: 600 !important; }
     .stButton>button { width: 100% !important; height: 70px !important; font-size: 22px !important; font-weight: bold !important; border-radius: 12px !important; margin-bottom: 10px !important; }
     div[data-testid="stNumberInput"] input { font-size: 24px !important; height: 55px !important; font-weight: bold !important; }
@@ -54,8 +67,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.8 📸")
-st.subheader("Wersja z autofleszem kamery i zabezpieczeniem przed dublowaniem PZ")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v2.9 📸")
+st.subheader("Wersja zabezpieczona z ukrytym menu systemowym")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -258,7 +271,6 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     ilosc_palet_dostarczonych = st.number_input("Ilość przywiezienych palet:", min_value=0, value=0)
     waga_netto_laczna = ilosc_szt_kg_laczna
     
-    # 📸 FOTO DLA SZYBKIEGO PRZYJĘCIA (Wersja z inkrementacją klucza dla autorestartu)
     st.markdown("#### 📸 Załącznik: Zdjęcie ładunku / busa")
     key_busy_cam = f"cam_busy_node_{st.session_state['cam_busy_counter']}"
     foto_busy_capture = st.camera_input("Zrób zdjęcie poglądowe towaru:", key=key_busy_cam)
@@ -284,7 +296,6 @@ else:
     
     st.warning(f"🧮 Wyliczone NETTO dla obecnej palety: **{netto_palety_wyliczone} kg**")
     
-    # 📸 APARAT DLA TIR (Dynamiczny klucz resetujący aparat)
     st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
     key_tir_cam = f"cam_tir_node_{st.session_state['cam_tir_counter']}"
     foto_capture = st.camera_input("Zrób zdjęcie palety przed kliknięciem plusa (+):", key=key_tir_cam)
@@ -304,9 +315,8 @@ else:
             })
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
-            st.session_state["cam_tir_counter"] += 1  # 🔄 AUTO-RESTART OBIEKTYWU APARATU
+            st.session_state["cam_tir_counter"] += 1  
             st.success(f"✔️ Zapisano Paletę nr {len(st.session_state['palety_tir'])}!")
-            st. those_are_fine = None
             st.rerun()
         else: st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
             
@@ -317,7 +327,7 @@ else:
         
         zrobione_zdjecia = sum(1 for p in st.session_state["palety_tir"] if p.get('foto_bytes') is not None)
         
-        st.markdown(f"**📑 PODSUMOWANIE ROZŁADUNKU:**")
+        st.markdown(f"**### PODSUMOWANIE ROZŁADUNKU:**")
         st.info(f"Palet: `{ilosc_palet_dostarczonych}` | Skrzynek razem: `{ilosc_opakowan_laczna} szt.` | NETTO: **{waga_netto_laczna} kg** | Fotografie: `{zrobione_zdjecia}/{ilosc_palet_dostarczonych}`")
         if st.button("🗑️ RESETUJ I WYCZYŚĆ WAŻENIA"):
             st.session_state["palety_tir"] = []
@@ -451,7 +461,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
             st.toast("🔥 Zapisano pomyślnie w Firebase!")
             
-            # 🧼 PANCERNE CZYSZCZENIE EKRANU PRZED DUBLAMI
+            # 🧼 CZYSZCZENIE EKRANU
             st.session_state["palety_tir"] = []
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
@@ -459,7 +469,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             st.session_state["status_jakosci"] = "NIEWYBRANY"
             st.session_state["cam_tir_counter"] += 1
             st.session_state["cam_busy_counter"] += 1
-            st.session_state["canvas_key_counter"] += 1  # Czyści podpis cyfrowy na ekranie
+            st.session_state["canvas_key_counter"] += 1  
             
             st.success("📦 Przyjęcie zarejestrowane! Dane wyczyszczone. Pobierz gotowy dokument PDF poniżej.")
             st.rerun()
