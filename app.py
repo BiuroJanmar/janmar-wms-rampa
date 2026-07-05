@@ -22,6 +22,9 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
+# 🔒 TWARDE WYMUSZENIE TRYBU WIDZA DLA CAŁEJ PLATFORMY (UKRYWA MENU I TOOLBAR SYSTEMOWY)
+st.set_option("client.toolbarMode", "viewer")
+
 # KONFIGURACJA POŁĄCZENIA FIREBASE
 FIREBASE_BASE_URL = "https://janmar-kalkulator-default-rtdb.europe-west1.firebasedatabase.app"
 FIREBASE_URL = f"{FIREBASE_BASE_URL}/janmar_wms_rampa.json"
@@ -59,7 +62,6 @@ def przeslij_pdf_na_google_drive(file_bytes, file_name):
         
         media = MediaIoBaseUpload(BytesIO(file_bytes), mimetype='application/pdf', resumable=False)
         
-        # Włączenie pełnego wsparcia dla Dysków Współdzielonych Workspace
         plik = service.files().create(
             body=metadata_pliku, 
             media_body=media, 
@@ -98,7 +100,7 @@ if not st.session_state["autoryzowany"]:
             st.error("❌ Błędne hasło!")
     st.stop()
 
-# --- CSS STYLIZACJA (Bezpieczny interfejs bez pasków Streamlita) ---
+# --- CSS STYLIZACJA (Maksymalne maskowanie elementów graficznych) ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -119,8 +121,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v3.0 📸")
-st.subheader("System spięty z Google Workspace i fotorejestrem")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v3.2 📸")
+st.subheader("Pełna blokada interfejsu (Viewer Mode)")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
@@ -188,7 +190,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     story.append(Paragraph(f"DOKUMENT PZ - PRZYJĘCIE ZEWNĘTRZNE nr: {nr_pz}", title_style))
     story.append(Spacer(1, 15))
     
-    status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCWY' else '#e74c3c')
+    status_kolor = '#2ecc71' if status == 'ZIELONY' else ('#f39c12' if status == 'POMARAŃCZOWY' else '#e74c3c')
     
     dane_ogolne = [
         [Paragraph(f"<b>Nabywca / Magazyn:</b><br/>GPW JANMAR SP. Z O.O.<br/>ul. Gołaśka 3/58, Kraków", sub_style),
@@ -290,7 +292,7 @@ wybrany_towar = st.selectbox("Wybierz rodzaj towaru:", options=opcje_asortymentu
 
 nowy_towar_chk = st.checkbox("➕ [ RĘCZNE DODAWANIE NOWEGO ASORTYMENTU ]")
 if nowy_towar_chk:
-    dodaj_towar_nazwa = st.text_input("Wpisz new nazwę towaru:")
+    dodaj_towar_nazwa = st.text_input("Wpisz nową nazwę towaru:")
     if st.button("💾 ZAPISZ ASORTYMENT TRWALE W CHMURZE"):
         if dodaj_towar_nazwa:
             nowy_t_id = f"A-{random.randint(100, 999)}"
@@ -324,10 +326,16 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     
     st.markdown("#### 📸 Załącznik: Zdjęcie ładunku / busa")
     key_busy_cam = f"cam_busy_node_{st.session_state['cam_busy_counter']}"
-    foto_busy_capture = st.camera_input("Zrób zdjęcie poglądowe towaru w busie:", key=key_busy_cam)
+    foto_busy_capture = st.camera_input("Zrób zdjęcie (Kamera tylna):", key=key_busy_cam)
+    
+    plik_busy_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie systemem tabletu:", type=["jpg", "png", "jpeg"], key="backup_busy_upload")
+    
     if foto_busy_capture is not None:
         st.session_state["foto_busy_bytes"] = foto_busy_capture.getvalue()
-        st.success("✅ Zdjęcie ładunku dodane do protokołu małego przyjęcia!")
+        st.success("✅ Zdjęcie ładunku dodane!")
+    elif plik_busy_backup is not None:
+        st.session_state["foto_busy_bytes"] = plik_busy_backup.getvalue()
+        st.success("✅ Zdjęcie z pliku/systemu dodane!")
 else:
     col1, col2, col3 = st.columns(3)
     with col1: 
@@ -349,12 +357,18 @@ else:
     
     st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
     key_tir_cam = f"cam_tir_node_{st.session_state['cam_tir_counter']}"
-    foto_capture = st.camera_input("Zrób zdjęcie palety przed kliknięciem plusa (+):", key=key_tir_cam)
+    
+    foto_capture = st.camera_input("Zrób zdjęcie palety (Kamera tylna):", key=key_tir_cam)
+    
+    plik_tir_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie aparatem Lenovo:", type=["jpg", "png", "jpeg"], key="backup_tir_upload")
     
     foto_bytes_zapis = None
     if foto_capture is not None:
         foto_bytes_zapis = foto_capture.getvalue()
-        st.success("✅ Zdjęcie palety zostało zablokowane w pamięci!")
+        st.success("✅ Zdjęcie z aparatu zablokowane w pamięci!")
+    elif plik_tir_backup is not None:
+        foto_bytes_zapis = plik_tir_backup.getvalue()
+        st.success("✅ Zdjęcie z systemu dodane do pamięci palety!")
 
     if st.button("➕ ZATWIERDŹ I ZWAŻ NASTĘPNĄ PALETĘ"):
         if waga_brutto_p > 0 and ilosc_op_p > 0:
@@ -366,7 +380,7 @@ else:
             })
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
-            st.session_state["cam_tir_counter"] += 1  # 🔄 AUTO-RESTART OBIEKTYWU APARATU
+            st.session_state["cam_tir_counter"] += 1  
             st.success(f"✔️ Zapisano Paletę nr {len(st.session_state['palety_tir'])}!")
             st.rerun()
         else: st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
@@ -477,7 +491,6 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
         final_opakowania = ilosc_opakowan_laczna
         final_palety = ilosc_palet_dostarczonych
         
-        # 1. Generowanie pliku PDF
         pdf_data = generuj_pdf_pz(
             losowy_nr_pz.replace("_","/"), automatyczna_data, wybrany_id, dane_d_koncowe, wybrany_towar,
             f"{rodzaj_opakowania} - {szczegoly_opakowania}", rodzaj_palety,
@@ -486,8 +499,6 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             aktualna_lista_palet, final_foto_busy
         )
         
-        # 2. 📂 AUTOMATYCZNA TRANSMISJA CHMUROWA NA DYSK WSPÓŁDZIELONY WORKSPACE
-        st.info("🔄 Zapisywanie nienaruszonego raportu PDF na firmowy Dysk Workspace Janmar...")
         nazwa_pliku_pdf = f"PZ_{id_losowe}_{rok_biezacy}.pdf"
         drive_link = przeslij_pdf_na_google_drive(pdf_data, nazwa_pliku_pdf)
         
@@ -511,14 +522,14 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             "status_jakosci": st.session_state["status_jakosci"],
             "uwagi": komentarz_jakosc,
             "magazynier": wybrany_magazynier,
-            "link_drive": drive_link if drive_link else ""  # Link odblokuje przyciski w panelu Archiwum
+            "link_drive": drive_link if drive_link else ""  
         }
         
         try:
             requests.put(f"{FIREBASE_URL.replace('.json', '')}/{losowy_nr_pz}.json", data=json.dumps(payload))
             st.toast("🔥 Zapisano pomyślnie w chmurze Firebase!")
             
-            # 🧼 TOTALNE CZYSZCZENIE EKRANU (Zabezpieczenie przed dublami)
+            # 🧼 TOTALNE CZYSZCZENIE EKRANU
             st.session_state["palety_tir"] = []
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
