@@ -1,0 +1,17 @@
+{
+  "short_name": "Janmar Rampa",
+  "name": "JANMAR WMS - PANEL RAMPOWY",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/407/407826.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1F497D",
+  "theme_color": "#1F497D",
+  "display": "standalone",
+  "orientation": "portrait"
+}
