@@ -22,7 +22,21 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
-# 🔒 TWARDE WYMUSZENIE TRYBU WIDZA DLA CAŁEJ PLATFORMY (UKRYWA MENU I TOOLBAR SYSTEMOWY)
+# --- 🚀 REJESTRACJA PANCERNEJ APLIKACJI INSTALOWALNEJ (PWA) ---
+st.markdown("""
+    <head>
+        <link rel="manifest" href="/manifest.json">
+        <script>
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/service-worker.js')
+                .then(function(reg) { console.log('Janmar PWA wdrożone pomyślnie!'); })
+                .catch(function(err) { console.error('Błąd rejestracji PWA:', err); });
+            }
+        </script>
+    </head>
+""", unsafe_allow_html=True)
+
+# 🔒 TWARDE WYMUSZENIE TRYBU WIDZA W KODZIE ŹRÓDŁOWYM
 st.set_option("client.toolbarMode", "viewer")
 
 # KONFIGURACJA POŁĄCZENIA FIREBASE
@@ -100,7 +114,7 @@ if not st.session_state["autoryzowany"]:
             st.error("❌ Błędne hasło!")
     st.stop()
 
-# --- CSS STYLIZACJA (Maksymalne maskowanie elementów graficznych) ---
+# --- CSS STYLIZACJA (Maskowanie interfejsu przeglądarki) ---
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -121,8 +135,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v3.2 📸")
-st.subheader("Pełna blokada interfejsu (Viewer Mode)")
+st.title("🏭 JANMAR WMS - PANEL PRZYJĘCIA v3.3 📸")
+st.subheader("Wersja dedykowana do instalacji jako aplikacja")
 
 if st.button("🔒 WYLOGUJ Z PANELU"):
     st.session_state["autoryzowany"] = False
