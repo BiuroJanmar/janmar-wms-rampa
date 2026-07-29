@@ -474,7 +474,7 @@ st.header("5. Podpis Dostawcy i Autoryzacja")
 st.markdown("✍️ ... Podpisz się palcem w ramce:")
 
 canvas_key = f"signature_canvas_{st.session_state['canvas_key_counter']}"
-canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background-color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key=canvas_key)
+canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key=canvas_key)
 
 opcje_magazynierów = list(baza_pracownikow.values())
 wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=opcje_magazynierów + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
