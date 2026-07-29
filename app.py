@@ -191,7 +191,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     except: f_regular, f_bold = 'Helvetica', 'Helvetica-Bold'
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottom=30)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     story = []
     
     title_style = ParagraphStyle('TitleStyle', fontName=f_bold, fontSize=18, leading=22, textColor=colors.HexColor('#1F497D'), alignment=1)
@@ -339,10 +339,20 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     waga_netto_laczna = ilosc_szt_kg_laczna
     
     st.markdown("#### 📸 Załącznik: Zdjęcie ładunku / busa")
-    key_busy_cam = f"cam_busy_node_{st.session_state['cam_busy_counter']}"
-    foto_busy_capture = st.camera_input("Zrób zdjęcie (Kamera tylna):", key=key_busy_cam)
     
-    plik_busy_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie systemem tabletu:", type=["jpg", "png", "jpeg"], key="backup_busy_upload")
+    # OPCJONALNY APARAT DLA BUSÓW
+    włącz_aparat_busy = st.toggle("📸 Dodać zdjęcie ładunku / busa? (np. uszkodzenie, zła jakość)", value=False)
+    
+    foto_busy_capture = None
+    plik_busy_backup = None
+    
+    if włącz_aparat_busy:
+        wybor_kamery_busy = st.radio("Wybierz obiektyw aparatu:", ["📸 Aparat TYLNY (Główny)", "🤳 Aparat PRZEDNI"], key="cam_busy_select")
+        facing_mode_busy = "environment" if "TYLNY" in wybor_kamery_busy else "user"
+        
+        key_busy_cam = f"cam_busy_node_{st.session_state['cam_busy_counter']}"
+        foto_busy_capture = st.camera_input("Zrób zdjęcie ładunku:", key=key_busy_cam, facing_mode=facing_mode_busy)
+        plik_busy_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie systemem tabletu:", type=["jpg", "png", "jpeg"], key="backup_busy_upload")
     
     if foto_busy_capture is not None:
         st.session_state["foto_busy_bytes"] = foto_busy_capture.getvalue()
@@ -370,13 +380,22 @@ else:
     st.warning(f"🧮 Wyliczone NETTO dla obecnej palety: **{netto_palety_wyliczone} kg**")
     
     st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
-    key_tir_cam = f"cam_tir_node_{st.session_state['cam_tir_counter']}"
     
-    foto_capture = st.camera_input("Zrób zdjęcie palety (Kamera tylna):", key=key_tir_cam)
+    # OPCJONALNY APARAT DLA TIRÓW
+    włącz_aparat_tir = st.toggle("📸 Dodać zdjęcie palety na wadze? (np. uszkodzenie, zła jakość)", value=False)
     
-    plik_tir_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie aparatem Lenovo:", type=["jpg", "png", "jpeg"], key="backup_tir_upload")
-    
+    foto_capture = None
+    plik_tir_backup = None
     foto_bytes_zapis = None
+    
+    if włącz_aparat_tir:
+        wybor_kamery_tir = st.radio("Wybierz obiektyw aparatu:", ["📸 Aparat TYLNY (Główny)", "🤳 Aparat PRZEDNI"], key="cam_tir_select")
+        facing_mode_tir = "environment" if "TYLNY" in wybor_kamery_tir else "user"
+        
+        key_tir_cam = f"cam_tir_node_{st.session_state['cam_tir_counter']}"
+        foto_capture = st.camera_input("Zrób zdjęcie palety:", key=key_tir_cam, facing_mode=facing_mode_tir)
+        plik_tir_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie aparatem Lenovo:", type=["jpg", "png", "jpeg"], key="backup_tir_upload")
+    
     if foto_capture is not None:
         foto_bytes_zapis = foto_capture.getvalue()
         st.success("✅ Zdjęcie z aparatu zablokowane w pamięci!")
@@ -455,7 +474,7 @@ st.header("5. Podpis Dostawcy i Autoryzacja")
 st.markdown("✍️ ... Podpisz się palcem w ramce:")
 
 canvas_key = f"signature_canvas_{st.session_state['canvas_key_counter']}"
-canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background_color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key=canvas_key)
+canvas_result = st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=3, stroke_color="#1F497D", background-color="#FFFFFF", height=150, width=400, drawing_mode="freedraw", key=canvas_key)
 
 opcje_magazynierów = list(baza_pracownikow.values())
 wybrany_magazynier = st.selectbox("Przyjmujący magazynier:", options=opcje_magazynierów + ["➕ DODAJ NOWEGO MAGAZYNIERA DO LISTY"])
