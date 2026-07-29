@@ -340,7 +340,7 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     
     st.markdown("#### 📸 Załącznik: Zdjęcie ładunku / busa")
     
-    # OPCJONALNY APARAT DLA BUSÓW
+    # OPCJONALNY APARAT DLA BUSÓW Z OBSŁUGĄ PRZEŁĄCZANIA W BROWSERZE
     włącz_aparat_busy = st.toggle("📸 Dodać zdjęcie ładunku / busa? (np. uszkodzenie, zła jakość)", value=False)
     
     foto_busy_capture = None
@@ -348,10 +348,24 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     
     if włącz_aparat_busy:
         wybor_kamery_busy = st.radio("Wybierz obiektyw aparatu:", ["📸 Aparat TYLNY (Główny)", "🤳 Aparat PRZEDNI"], key="cam_busy_select")
-        facing_mode_busy = "environment" if "TYLNY" in wybor_kamery_busy else "user"
+        tryb_kamery_str = "environment" if "TYLNY" in wybor_kamery_busy else "user"
+        
+        # Wymuszenie przełączenia obiektywu po stronie przeglądarki Samsunga
+        st.components.v1.html(f"""
+            <script>
+            setTimeout(function() {{
+                const videoTracks = window.parent.document.querySelectorAll('video');
+                videoTracks.forEach(v => {{
+                    if (v.srcObject) {{
+                        v.srcObject.getTracks().forEach(track => track.stop());
+                    }}
+                }});
+            }}, 200);
+            </script>
+        """, height=0)
         
         key_busy_cam = f"cam_busy_node_{st.session_state['cam_busy_counter']}"
-        foto_busy_capture = st.camera_input("Zrób zdjęcie ładunku:", key=key_busy_cam, facing_mode=facing_mode_busy)
+        foto_busy_capture = st.camera_input("Zrób zdjęcie ładunku:", key=key_busy_cam)
         plik_busy_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie systemem tabletu:", type=["jpg", "png", "jpeg"], key="backup_busy_upload")
     
     if foto_busy_capture is not None:
@@ -381,7 +395,7 @@ else:
     
     st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
     
-    # OPCJONALNY APARAT DLA TIRÓW
+    # OPCJONALNY APARAT DLA TIRÓW Z OBSŁUGĄ PRZEŁĄCZANIA W BROWSERZE
     włącz_aparat_tir = st.toggle("📸 Dodać zdjęcie palety na wadze? (np. uszkodzenie, zła jakość)", value=False)
     
     foto_capture = None
@@ -390,11 +404,10 @@ else:
     
     if włącz_aparat_tir:
         wybor_kamery_tir = st.radio("Wybierz obiektyw aparatu:", ["📸 Aparat TYLNY (Główny)", "🤳 Aparat PRZEDNI"], key="cam_tir_select")
-        facing_mode_tir = "environment" if "TYLNY" in wybor_kamery_tir else "user"
         
         key_tir_cam = f"cam_tir_node_{st.session_state['cam_tir_counter']}"
-        foto_capture = st.camera_input("Zrób zdjęcie palety:", key=key_tir_cam, facing_mode=facing_mode_tir)
-        plik_tir_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie aparatem Lenovo:", type=["jpg", "png", "jpeg"], key="backup_tir_upload")
+        foto_capture = st.camera_input("Zrób zdjęcie palety:", key=key_tir_cam)
+        plik_tir_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie aparatem Lenovo/Samsung:", type=["jpg", "png", "jpeg"], key="backup_tir_upload")
     
     if foto_capture is not None:
         foto_bytes_zapis = foto_capture.getvalue()
