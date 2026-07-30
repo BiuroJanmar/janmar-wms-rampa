@@ -11,7 +11,7 @@ from streamlit_drawable_canvas import st_canvas
 
 # Importy do generowania PDF i obsługi obrazów/załączników
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
@@ -153,6 +153,21 @@ if "foto_busy_bytes" not in st.session_state: st.session_state["foto_busy_bytes"
 if "tmp_foto_tir_bytes" not in st.session_state: st.session_state["tmp_foto_tir_bytes"] = None
 if "canvas_key_counter" not in st.session_state: st.session_state["canvas_key_counter"] = 0
 
+# Funkcja pomocnicza do przetwarzania obrazu na czysty bufor PNG dla ReportLab
+def przetworz_obraz_do_bytes(raw_bytes):
+    if not raw_bytes:
+        return None
+    try:
+        img = PILImage.open(BytesIO(raw_bytes))
+        img = img.convert("RGB")
+        img.thumbnail((800, 800))
+        out_buffer = BytesIO()
+        img.save(out_buffer, format="JPEG", quality=85)
+        return out_buffer.getvalue()
+    except Exception as e:
+        print(f"Błąd przetwarzania obrazu: {e}")
+        return None
+
 # --- FUNKCJE POBIERANIA/ZAPISYWANIA SŁOWNIKÓW Z FIREBASE ---
 def pobierz_slownik_firebase(url, domyslny_slownik):
     try:
@@ -228,9 +243,9 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
     podpis_kierowcy_io = BytesIO()
     podpis_img.save(podpis_kierowcy_io, format='PNG')
     podpis_kierowcy_io.seek(0)
-    img_podpis = Image(podpis_kierowcy_io, width=120, height=50)
+    img_podpis = RLImage(podpis_kierowcy_io, width=120, height=50)
     
-    img_qr = Image(qr_img_bytes, width=70, height=70)
+    img_qr = RLImage(qr_img_bytes, width=70, height=70)
     
     tabela_podpisow = [
         [Paragraph(f"<b>Podpis Magazyniera Janmar:</b><br/><br/>............................................<br/>{java_pracownik}", sub_style),
@@ -252,7 +267,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
         if ma_foto_busy:
             story.append(Paragraph("📸 Dokumentacja fotograficzna dostawy (Szybkie przyjęcie / Bus):", section_style))
             io_fb = BytesIO(foto_busy)
-            img_fb = Image(io_fb, width=400, height=260)
+            img_fb = RLImage(io_fb, width=380, height=250)
             img_fb.hAlign = 'CENTER'
             story.append(img_fb)
             
@@ -263,7 +278,7 @@ def generuj_pdf_pz(nr_pz, data, dostawca_id, dostawca_dane, towar, opakowanie_st
                     story.append(Paragraph(f"Skrzynek: <b>{paleta['opakowania']} szt.</b> | Waga netto: <b>{paleta['netto']} kg</b>", sub_style))
                     story.append(Spacer(1, 4))
                     io_foto = BytesIO(paleta['foto_bytes'])
-                    img_reportlab = Image(io_foto, width=380, height=240)
+                    img_reportlab = RLImage(io_foto, width=350, height=220)
                     img_reportlab.hAlign = 'CENTER'
                     story.append(img_reportlab)
                     story.append(Spacer(1, 10))
@@ -341,8 +356,11 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     if włącz_aparat_busy:
         plik_busy_upload = st.file_uploader("📷 Kliknij tutaj, aby zrobić zdjęcie aparatem tabletu:", type=["jpg", "png", "jpeg"], key="busy_cam_uploader")
         if plik_busy_upload is not None:
-            st.session_state["foto_busy_bytes"] = plik_busy_upload.getvalue()
-            st.success("✅ Zdjęcie ładunku zapisane w pamięci!")
+            processed_busy = przetworz_obraz_do_bytes(plik_busy_upload.getvalue())
+            if processed_busy:
+                st.session_state["foto_busy_bytes"] = processed_busy
+                st.success("✅ Zdjęcie ładunku zapisane i przetworzone!")
+                st.image(processed_busy, width=300, caption="Podgląd zdjęcia w raporcie")
     else:
         st.session_state["foto_busy_bytes"] = None
 
@@ -371,8 +389,11 @@ else:
     if włącz_aparat_tir:
         plik_tir_upload = st.file_uploader("📷 Kliknij tutaj, aby zrobić zdjęcie aparatem tabletu:", type=["jpg", "png", "jpeg"], key="tir_cam_uploader")
         if plik_tir_upload is not None:
-            st.session_state["tmp_foto_tir_bytes"] = plik_tir_upload.getvalue()
-            st.success("✅ Zdjęcie palety gotowe do zatwierdzenia!")
+            processed_tir = przetworz_obraz_do_bytes(plik_tir_upload.getvalue())
+            if processed_tir:
+                st.session_state["tmp_foto_tir_bytes"] = processed_tir
+                st.success("✅ Zdjęcie palety przetworzone!")
+                st.image(processed_tir, width=250, caption="Podgląd zdjęcia palety")
     else:
         st.session_state["tmp_foto_tir_bytes"] = None
 
