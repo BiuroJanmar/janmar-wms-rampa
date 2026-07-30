@@ -152,8 +152,9 @@ if "tmp_waga_jednego_op" not in st.session_state: st.session_state["tmp_waga_jed
 if "foto_busy_bytes" not in st.session_state: st.session_state["foto_busy_bytes"] = None
 if "tmp_foto_tir_bytes" not in st.session_state: st.session_state["tmp_foto_tir_bytes"] = None
 if "canvas_key_counter" not in st.session_state: st.session_state["canvas_key_counter"] = 0
+if "cam_counter_tir" not in st.session_state: st.session_state["cam_counter_tir"] = 0
+if "cam_counter_busy" not in st.session_state: st.session_state["cam_counter_busy"] = 0
 
-# Funkcja pomocnicza do przetwarzania obrazu na czysty bufor PNG dla ReportLab
 def przetworz_obraz_do_bytes(raw_bytes):
     if not raw_bytes:
         return None
@@ -165,7 +166,7 @@ def przetworz_obraz_do_bytes(raw_bytes):
         img.save(out_buffer, format="JPEG", quality=85)
         return out_buffer.getvalue()
     except Exception as e:
-        print(f"Błąd przetwarzania obrazu: {e}")
+        print(f"Błąd obrazu: {e}")
         return None
 
 # --- FUNKCJE POBIERANIA/ZAPISYWANIA SŁOWNIKÓW Z FIREBASE ---
@@ -344,6 +345,25 @@ waga_netto_laczna = 0.0
 ilosc_opakowan_laczna = 0
 ilosc_palet_dostarczonych = 0
 
+# SKRYPT JS DO WYMUSZENIA TYLNEJ KAMERY NA TABLECIE SAMSUNG
+st.components.v1.html("""
+    <script>
+    setTimeout(function() {
+        const videoElements = window.parent.document.querySelectorAll('video');
+        videoElements.forEach(v => {
+            if (v.srcObject) {
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "environment" } } })
+                .then(stream => { v.srcObject = stream; })
+                .catch(err => {
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                    .then(s => { v.srcObject = s; });
+                });
+            }
+        });
+    }, 1000);
+    </script>
+""", height=0)
+
 if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     ilosc_szt_kg_laczna = st.number_input("Łączna ilość towaru (kg / szt):", min_value=0.0, value=0.0)
     ilosc_opakowan_laczna = st.number_input("Ilość przywiezionych skrzynek:", min_value=0, value=0)
@@ -354,13 +374,13 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     włącz_aparat_busy = st.toggle("📸 Dodać zdjęcie ładunku / busa? (np. uszkodzenie, zła jakość)", value=False)
     
     if włącz_aparat_busy:
-        plik_busy_upload = st.file_uploader("📷 Kliknij tutaj, aby zrobić zdjęcie aparatem tabletu:", type=["jpg", "png", "jpeg"], key="busy_cam_uploader")
-        if plik_busy_upload is not None:
-            processed_busy = przetworz_obraz_do_bytes(plik_busy_upload.getvalue())
-            if processed_busy:
-                st.session_state["foto_busy_bytes"] = processed_busy
-                st.success("✅ Zdjęcie ładunku zapisane i przetworzone!")
-                st.image(processed_busy, width=300, caption="Podgląd zdjęcia w raporcie")
+        cam_key_busy = f"busy_cam_input_{st.session_state['cam_counter_busy']}"
+        foto_busy_val = st.camera_input("Zrób zdjęcie ładunku (Aparat Tylny):", key=cam_key_busy)
+        if foto_busy_val is not None:
+            proc_busy = przetworz_obraz_do_bytes(foto_busy_val.getvalue())
+            if proc_busy:
+                st.session_state["foto_busy_bytes"] = proc_busy
+                st.success("✅ Zdjęcie ładunku dodane do raportu!")
     else:
         st.session_state["foto_busy_bytes"] = None
 
@@ -387,13 +407,13 @@ else:
     włącz_aparat_tir = st.toggle("📸 Dodać zdjęcie palety na wadze? (np. uszkodzenie, zła jakość)", value=False)
     
     if włącz_aparat_tir:
-        plik_tir_upload = st.file_uploader("📷 Kliknij tutaj, aby zrobić zdjęcie aparatem tabletu:", type=["jpg", "png", "jpeg"], key="tir_cam_uploader")
-        if plik_tir_upload is not None:
-            processed_tir = przetworz_obraz_do_bytes(plik_tir_upload.getvalue())
-            if processed_tir:
-                st.session_state["tmp_foto_tir_bytes"] = processed_tir
-                st.success("✅ Zdjęcie palety przetworzone!")
-                st.image(processed_tir, width=250, caption="Podgląd zdjęcia palety")
+        cam_key_tir = f"tir_cam_input_{st.session_state['cam_counter_tir']}"
+        foto_tir_val = st.camera_input("Zrób zdjęcie palety (Aparat Tylny):", key=cam_key_tir)
+        if foto_tir_val is not None:
+            proc_tir = przetworz_obraz_do_bytes(foto_tir_val.getvalue())
+            if proc_tir:
+                st.session_state["tmp_foto_tir_bytes"] = proc_tir
+                st.success("✅ Zdjęcie palety zablokowane w pamięci!")
     else:
         st.session_state["tmp_foto_tir_bytes"] = None
 
@@ -408,6 +428,7 @@ else:
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
             st.session_state["tmp_foto_tir_bytes"] = None
+            st.session_state["cam_counter_tir"] += 1
             st.success(f"✔️ Zapisano Paletę nr {len(st.session_state['palety_tir'])}!")
             st.rerun()
         else: st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
@@ -564,6 +585,8 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             st.session_state["tmp_foto_tir_bytes"] = None
             st.session_state["status_jakosci"] = "NIEWYBRANY"
             st.session_state["canvas_key_counter"] += 1  
+            st.session_state["cam_counter_tir"] += 1
+            st.session_state["cam_counter_busy"] += 1
             
             st.success("📦 Przyjęcie zarejestrowane! Dokument wysłany na Dysk Google. Formularz wyczyszczony.")
             st.rerun()
