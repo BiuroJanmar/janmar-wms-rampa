@@ -150,6 +150,7 @@ if "tmp_waga_brutto" not in st.session_state: st.session_state["tmp_waga_brutto"
 if "tmp_ilosc_op" not in st.session_state: st.session_state["tmp_ilosc_op"] = 0
 if "tmp_waga_jednego_op" not in st.session_state: st.session_state["tmp_waga_jednego_op"] = 0.5
 if "foto_busy_bytes" not in st.session_state: st.session_state["foto_busy_bytes"] = None
+if "tmp_foto_tir_bytes" not in st.session_state: st.session_state["tmp_foto_tir_bytes"] = None
 if "canvas_key_counter" not in st.session_state: st.session_state["canvas_key_counter"] = 0
 
 # --- FUNKCJE POBIERANIA/ZAPISYWANIA SŁOWNIKÓW Z FIREBASE ---
@@ -335,17 +336,16 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     waga_netto_laczna = ilosc_szt_kg_laczna
     
     st.markdown("#### 📸 Załącznik: Zdjęcie ładunku / busa")
-    
-    # OPCJONALNY APARAT SYSTEMOWY DLA BUSÓW
     włącz_aparat_busy = st.toggle("📸 Dodać zdjęcie ładunku / busa? (np. uszkodzenie, zła jakość)", value=False)
     
-    plik_busy_upload = None
     if włącz_aparat_busy:
         plik_busy_upload = st.file_uploader("📷 Kliknij tutaj, aby zrobić zdjęcie aparatem tabletu:", type=["jpg", "png", "jpeg"], key="busy_cam_uploader")
-    
-    if plik_busy_upload is not None:
-        st.session_state["foto_busy_bytes"] = plik_busy_upload.getvalue()
-        st.success("✅ Zdjęcie ładunku dodane!")
+        if plik_busy_upload is not None:
+            st.session_state["foto_busy_bytes"] = plik_busy_upload.getvalue()
+            st.success("✅ Zdjęcie ładunku zapisane w pamięci!")
+    else:
+        st.session_state["foto_busy_bytes"] = None
+
 else:
     col1, col2, col3 = st.columns(3)
     with col1: 
@@ -366,19 +366,15 @@ else:
     st.warning(f"🧮 Wyliczone NETTO dla obecnej palety: **{netto_palety_wyliczone} kg**")
     
     st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
-    
-    # OPCJONALNY APARAT SYSTEMOWY DLA TIRÓW
     włącz_aparat_tir = st.toggle("📸 Dodać zdjęcie palety na wadze? (np. uszkodzenie, zła jakość)", value=False)
-    
-    plik_tir_upload = None
-    foto_bytes_zapis = None
     
     if włącz_aparat_tir:
         plik_tir_upload = st.file_uploader("📷 Kliknij tutaj, aby zrobić zdjęcie aparatem tabletu:", type=["jpg", "png", "jpeg"], key="tir_cam_uploader")
-    
-    if plik_tir_upload is not None:
-        foto_bytes_zapis = plik_tir_upload.getvalue()
-        st.success("✅ Zdjęcie palety dodane!")
+        if plik_tir_upload is not None:
+            st.session_state["tmp_foto_tir_bytes"] = plik_tir_upload.getvalue()
+            st.success("✅ Zdjęcie palety gotowe do zatwierdzenia!")
+    else:
+        st.session_state["tmp_foto_tir_bytes"] = None
 
     if st.button("➕ ZATWIERDŹ I ZWAŻ NASTĘPNĄ PALETĘ"):
         if waga_brutto_p > 0 and ilosc_op_p > 0:
@@ -386,10 +382,11 @@ else:
                 "paleta_nr": len(st.session_state["palety_tir"]) + 1, 
                 "opakowania": int(ilosc_op_p), 
                 "netto": float(netto_palety_wyliczone),
-                "foto_bytes": foto_bytes_zapis  
+                "foto_bytes": st.session_state["tmp_foto_tir_bytes"]  
             })
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
+            st.session_state["tmp_foto_tir_bytes"] = None
             st.success(f"✔️ Zapisano Paletę nr {len(st.session_state['palety_tir'])}!")
             st.rerun()
         else: st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
@@ -407,6 +404,7 @@ else:
             st.session_state["palety_tir"] = []
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
+            st.session_state["tmp_foto_tir_bytes"] = None
             st.rerun()
 
 st.markdown("### 🔄 Saldo Wydawki")
@@ -542,6 +540,7 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
             st.session_state["foto_busy_bytes"] = None
+            st.session_state["tmp_foto_tir_bytes"] = None
             st.session_state["status_jakosci"] = "NIEWYBRANY"
             st.session_state["canvas_key_counter"] += 1  
             
