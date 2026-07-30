@@ -150,10 +150,6 @@ if "tmp_waga_brutto" not in st.session_state: st.session_state["tmp_waga_brutto"
 if "tmp_ilosc_op" not in st.session_state: st.session_state["tmp_ilosc_op"] = 0
 if "tmp_waga_jednego_op" not in st.session_state: st.session_state["tmp_waga_jednego_op"] = 0.5
 if "foto_busy_bytes" not in st.session_state: st.session_state["foto_busy_bytes"] = None
-
-# Liczniki kluczy dla twardego resetu aparatów i podpisu
-if "cam_tir_counter" not in st.session_state: st.session_state["cam_tir_counter"] = 0
-if "cam_busy_counter" not in st.session_state: st.session_state["cam_busy_counter"] = 0
 if "canvas_key_counter" not in st.session_state: st.session_state["canvas_key_counter"] = 0
 
 # --- FUNKCJE POBIERANIA/ZAPISYWANIA SŁOWNIKÓW Z FIREBASE ---
@@ -340,40 +336,16 @@ if tryb_przyjecia == "SZYBKIE PRZYJĘCIE (Mała dostawa / Busy)":
     
     st.markdown("#### 📸 Załącznik: Zdjęcie ładunku / busa")
     
-    # OPCJONALNY APARAT DLA BUSÓW Z OBSŁUGĄ PRZEŁĄCZANIA W BROWSERZE
+    # OPCJONALNY APARAT SYSTEMOWY DLA BUSÓW
     włącz_aparat_busy = st.toggle("📸 Dodać zdjęcie ładunku / busa? (np. uszkodzenie, zła jakość)", value=False)
     
-    foto_busy_capture = None
-    plik_busy_backup = None
-    
+    plik_busy_upload = None
     if włącz_aparat_busy:
-        wybor_kamery_busy = st.radio("Wybierz obiektyw aparatu:", ["📸 Aparat TYLNY (Główny)", "🤳 Aparat PRZEDNI"], key="cam_busy_select")
-        tryb_kamery_str = "environment" if "TYLNY" in wybor_kamery_busy else "user"
-        
-        # Wymuszenie przełączenia obiektywu po stronie przeglądarki Samsunga
-        st.components.v1.html(f"""
-            <script>
-            setTimeout(function() {{
-                const videoTracks = window.parent.document.querySelectorAll('video');
-                videoTracks.forEach(v => {{
-                    if (v.srcObject) {{
-                        v.srcObject.getTracks().forEach(track => track.stop());
-                    }}
-                }});
-            }}, 200);
-            </script>
-        """, height=0)
-        
-        key_busy_cam = f"cam_busy_node_{st.session_state['cam_busy_counter']}"
-        foto_busy_capture = st.camera_input("Zrób zdjęcie ładunku:", key=key_busy_cam)
-        plik_busy_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie systemem tabletu:", type=["jpg", "png", "jpeg"], key="backup_busy_upload")
+        plik_busy_upload = st.file_uploader("📷 Kliknij tutaj, aby zrobić zdjęcie aparatem tabletu:", type=["jpg", "png", "jpeg"], key="busy_cam_uploader")
     
-    if foto_busy_capture is not None:
-        st.session_state["foto_busy_bytes"] = foto_busy_capture.getvalue()
+    if plik_busy_upload is not None:
+        st.session_state["foto_busy_bytes"] = plik_busy_upload.getvalue()
         st.success("✅ Zdjęcie ładunku dodane!")
-    elif plik_busy_backup is not None:
-        st.session_state["foto_busy_bytes"] = plik_busy_backup.getvalue()
-        st.success("✅ Zdjęcie z pliku/systemu dodane!")
 else:
     col1, col2, col3 = st.columns(3)
     with col1: 
@@ -395,26 +367,18 @@ else:
     
     st.markdown("#### 📸 Załącznik: Zdjęcie palety na wadze")
     
-    # OPCJONALNY APARAT DLA TIRÓW Z OBSŁUGĄ PRZEŁĄCZANIA W BROWSERZE
+    # OPCJONALNY APARAT SYSTEMOWY DLA TIRÓW
     włącz_aparat_tir = st.toggle("📸 Dodać zdjęcie palety na wadze? (np. uszkodzenie, zła jakość)", value=False)
     
-    foto_capture = None
-    plik_tir_backup = None
+    plik_tir_upload = None
     foto_bytes_zapis = None
     
     if włącz_aparat_tir:
-        wybor_kamery_tir = st.radio("Wybierz obiektyw aparatu:", ["📸 Aparat TYLNY (Główny)", "🤳 Aparat PRZEDNI"], key="cam_tir_select")
-        
-        key_tir_cam = f"cam_tir_node_{st.session_state['cam_tir_counter']}"
-        foto_capture = st.camera_input("Zrób zdjęcie palety:", key=key_tir_cam)
-        plik_tir_backup = st.file_uploader("⚠️ Jeśli aparat wyżej nie działa, kliknij tu i zrób zdjęcie aparatem Lenovo/Samsung:", type=["jpg", "png", "jpeg"], key="backup_tir_upload")
+        plik_tir_upload = st.file_uploader("📷 Kliknij tutaj, aby zrobić zdjęcie aparatem tabletu:", type=["jpg", "png", "jpeg"], key="tir_cam_uploader")
     
-    if foto_capture is not None:
-        foto_bytes_zapis = foto_capture.getvalue()
-        st.success("✅ Zdjęcie z aparatu zablokowane w pamięci!")
-    elif plik_tir_backup is not None:
-        foto_bytes_zapis = plik_tir_backup.getvalue()
-        st.success("✅ Zdjęcie z systemu dodane do pamięci palety!")
+    if plik_tir_upload is not None:
+        foto_bytes_zapis = plik_tir_upload.getvalue()
+        st.success("✅ Zdjęcie palety dodane!")
 
     if st.button("➕ ZATWIERDŹ I ZWAŻ NASTĘPNĄ PALETĘ"):
         if waga_brutto_p > 0 and ilosc_op_p > 0:
@@ -426,7 +390,6 @@ else:
             })
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
-            st.session_state["cam_tir_counter"] += 1  
             st.success(f"✔️ Zapisano Paletę nr {len(st.session_state['palety_tir'])}!")
             st.rerun()
         else: st.error("❌ Aby dodać paletę, waga brutto i ilość skrzynek muszą być większe od 0!")
@@ -444,7 +407,6 @@ else:
             st.session_state["palety_tir"] = []
             st.session_state["tmp_waga_brutto"] = 0.0
             st.session_state["tmp_ilosc_op"] = 0
-            st.session_state["cam_tir_counter"] += 1
             st.rerun()
 
 st.markdown("### 🔄 Saldo Wydawki")
@@ -581,8 +543,6 @@ if st.button("🔒 ZATWIERDŹ PRZYJĘCIE I GENERUJ PDF"):
             st.session_state["tmp_ilosc_op"] = 0
             st.session_state["foto_busy_bytes"] = None
             st.session_state["status_jakosci"] = "NIEWYBRANY"
-            st.session_state["cam_tir_counter"] += 1
-            st.session_state["cam_busy_counter"] += 1
             st.session_state["canvas_key_counter"] += 1  
             
             st.success("📦 Przyjęcie zarejestrowane! Dokument wysłany na Dysk Google. Formularz wyczyszczony.")
